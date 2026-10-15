@@ -13,7 +13,7 @@ from .core.arena import format_table, headroom_table
 # The pilot's variants (suggest/reveal/accuse).
 VARIANTS = ["random/random/certain", "cand/random/certain", "focused/random/certain",
             "bluff/random/certain", "cand/smart/certain", "cand/random/gamble2",
-            "cand/random/gamble3", "focused/smart/gamble2"]
+            "cand/random/gamble3", "focused/smart/gamble2", "reader/smart/reader"]
 
 
 def main(argv=None):

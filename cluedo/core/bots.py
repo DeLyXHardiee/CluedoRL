@@ -78,6 +78,27 @@ def suggest_bluff(v):
     return tuple(out)
 
 
+def naming_counts(v):
+    """How often each card was named in Suggestions by the other Seats (Public history)."""
+    counts = {}
+    for e in v.public_events():
+        if e["type"] == "suggestion" and e["seat"] != v.seat:
+            for c in e["cards"]:
+                counts[c] = counts.get(c, 0) + 1
+    return counts
+
+
+def suggest_reader(v):
+    """Reads the Public history: in each category, names the Candidate the other Seats named
+    most often (ties random). A Bluff that names its own cards can mislead it."""
+    counts = naming_counts(v)
+    out = []
+    for cands in v.ded.category_candidates():
+        top = max(counts.get(c, 0) for c in cands)
+        out.append(v.rng.choice([c for c in cands if counts.get(c, 0) == top]))
+    return tuple(out)
+
+
 # ---------------------------------------------------------------- reveal rules
 
 def reveal_random(v, matching, asker):
@@ -102,11 +123,22 @@ def make_accuse_gamble(limit):
     return accuse
 
 
+def accuse_reader(v, limit=3):
+    """Gamble once at most `limit` Candidates remain, on the one the other Seats named most."""
+    cands = v.ded.candidates()
+    if len(cands) > limit:
+        return None
+    counts = naming_counts(v)
+    score = {t: sum(counts.get(c, 0) for c in t) for t in cands}
+    top = max(score.values())
+    return v.rng.choice([t for t in cands if score[t] == top])
+
+
 SUGGEST = {"random": suggest_random, "cand": suggest_cand,
-           "focused": suggest_focused, "bluff": suggest_bluff}
+           "focused": suggest_focused, "bluff": suggest_bluff, "reader": suggest_reader}
 REVEAL = {"random": reveal_random, "smart": reveal_smart}
 ACCUSE = {"certain": make_accuse_gamble(1), "gamble2": make_accuse_gamble(2),
-          "gamble3": make_accuse_gamble(3)}
+          "gamble3": make_accuse_gamble(3), "reader": accuse_reader}
 
 
 @dataclass(frozen=True)
