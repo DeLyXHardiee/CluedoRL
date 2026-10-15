@@ -1,0 +1,68 @@
+"""Checkpoints: save a training snapshot, load it back as a frozen policy.
+
+``load_checkpoint(path)`` returns a ``Checkpoint`` whose ``.actor`` has no gradients and whose
+``.player(game, seat, rng)`` is a drop-in player (``act(game)``) for the arena, the evaluation
+set, and ticket 10's Opponent sources (a Seat plays from its own Seat-relative observation).
+"""
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+
+import torch
+from tensordict import TensorDict
+
+from cluedo.rl.config import TrainConfig
+from cluedo.rl.encoding import SeatEncoder
+from cluedo.rl.env import CluedoEnv
+from cluedo.rl.ppo_stack import make_actor, make_critic
+
+
+def save_checkpoint(path, actor, critic, cfg: TrainConfig, condition: str, learner_steps: int,
+                    blind: bool = False, extra: dict | None = None) -> None:
+    cfg_d = asdict(cfg)
+    cfg_d["eval_players"] = list(cfg.eval_players)
+    torch.save({"actor": actor.state_dict(), "critic": critic.state_dict(), "cfg": cfg_d,
+                "condition": condition, "blind": blind, "learner_steps": learner_steps,
+                "extra": extra or {}}, path)
+
+
+@dataclass
+class Checkpoint:
+    actor: object  # frozen ProbabilisticActor
+    critic: object
+    cfg: TrainConfig
+    condition: str
+    blind: bool
+    learner_steps: int
+
+    def player(self, game, seat: int, rng, greedy: bool = False) -> "PolicyPlayer":
+        return PolicyPlayer(self.actor, game, seat, self.blind, greedy)
+
+
+def load_checkpoint(path) -> Checkpoint:
+    d = torch.load(path, map_location="cpu", weights_only=False)
+    cfg_d = dict(d["cfg"])
+    cfg_d["eval_players"] = tuple(cfg_d["eval_players"])
+    cfg = TrainConfig(**cfg_d)
+    actor, critic = make_actor(cfg.hidden, cfg.depth), make_critic(cfg.hidden, cfg.depth)
+    actor.load_state_dict(d["actor"])
+    critic.load_state_dict(d["critic"])
+    for m in (actor, critic):
+        m.eval().requires_grad_(False)
+    return Checkpoint(actor, critic, cfg, d["condition"], d["blind"], d["learner_steps"])
+
+
+class PolicyPlayer:
+    """A policy playing one Seat: encodes that Seat's view, samples a legal action."""
+
+    def __init__(self, actor, game, seat: int, blind: bool, greedy: bool = False):
+        self.actor, self.seat, self.greedy = actor, seat, greedy
+        self.enc = SeatEncoder(game, seat, blind=blind)
+
+    @torch.no_grad()
+    def act(self, game):
+        td = TensorDict({"observation": torch.from_numpy(self.enc.observation()),
+                         "action_mask": torch.from_numpy(self.enc.mask())}, [])
+        dist = self.actor.get_dist(td)
+        a = int(dist.logits.argmax(-1)) if self.greedy else int(dist.sample())
+        return CluedoEnv._to_core(a)
