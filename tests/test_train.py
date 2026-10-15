@@ -38,3 +38,15 @@ def test_logger_is_injectable_so_later_metrics_share_the_same_stream(tmp_path):
 def test_unknown_condition_is_rejected():
     with pytest.raises(ValueError):
         condition("nope")
+
+
+def test_update_phase_uses_the_configured_torch_threads(tmp_path):
+    """TorchRL's collector drops the trainer to 1 torch thread; the PPO update must get them back
+    (measured: 2.4k -> 3.9k steps/s at 6 players)."""
+    import torch
+    seen = []
+    log = RecordingLogger()
+    orig = log.scalar
+    log.scalar = lambda *a: (seen.append(torch.get_num_threads()), orig(*a))[1]
+    train(_tiny(total_frames=500, update_threads=3), "ppo-fb", tmp_path, logger=log)
+    assert 3 in seen

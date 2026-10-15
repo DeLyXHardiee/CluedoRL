@@ -56,13 +56,14 @@ class PolicyPlayer:
     """A policy playing one Seat: encodes that Seat's view, samples a legal action."""
 
     def __init__(self, actor, game, seat: int, blind: bool, greedy: bool = False):
+        from torchrl.modules import MLP
         self.actor, self.seat, self.greedy = actor, seat, greedy
+        self.net = next(m for m in actor.modules() if isinstance(m, MLP))  # bypass TensorDict overhead
         self.enc = SeatEncoder(game, seat, blind=blind)
 
     @torch.no_grad()
     def act(self, game):
-        td = TensorDict({"observation": torch.from_numpy(self.enc.observation()),
-                         "action_mask": torch.from_numpy(self.enc.mask())}, [])
-        dist = self.actor.get_dist(td)
-        a = int(dist.logits.argmax(-1)) if self.greedy else int(dist.sample())
+        logits = self.net(torch.from_numpy(self.enc.observation()))
+        logits = logits.masked_fill(~torch.from_numpy(self.enc.mask()), float("-inf"))
+        a = int(logits.argmax()) if self.greedy else int(torch.multinomial(torch.softmax(logits, -1), 1))
         return CluedoEnv._to_core(a)
