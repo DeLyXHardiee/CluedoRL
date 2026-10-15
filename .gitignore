@@ -1,0 +1,9 @@
+# Planning docs (kept local)
+.scratch/
+docs/
+CONTEXT.md
+cluedo_project_context.md
+simulator_gap_analysis.md
+
+# Python
+__pycache__/
