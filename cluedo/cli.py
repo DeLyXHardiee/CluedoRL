@@ -10,6 +10,7 @@ import random
 
 from .core import ACCUSE, SUGGEST, Game, random_legal
 from .core.cards import CARD_NAMES, CATS
+from .core.deduction import Deduction
 
 
 def fmt_cards(cards):
@@ -32,6 +33,18 @@ def describe(e):
         return (f"Seat {s} ACCUSES {fmt_cards(e['cards'])}: "
                 + ("CORRECT!" if e["correct"] else "wrong, eliminated."))
     return f"Seat {s} does not accuse."
+
+
+def knowledge_view(ded):
+    """Knowledge grid (X holds, - does not, ? unknown) per card, plus the Candidate count."""
+    cols = [f"Seat {p}" for p in range(ded.n)] + ["Envelope"]
+    lines = [f"{'':14s}" + " ".join(f"{c:>8s}" for c in cols)]
+    sym = {1: "X", 0: "-", None: "?"}
+    for c in range(len(CARD_NAMES)):
+        lines.append(f"{CARD_NAMES[c]:14s}" + " ".join(
+            f"{sym[ded.status(p, c)]:>8s}" for p in range(ded.n + 1)))
+    lines.append(f"Candidates: {ded.candidate_count()}  Open clauses: {ded.open_clause_count()}")
+    return "\n".join(lines)
 
 
 def parse_cards(text):
@@ -72,8 +85,12 @@ def play(game, human_seat, rng, inp=input, out=print):
     out("Hand sizes: " + ", ".join(f"S{i}={n}" for i, n in enumerate(game.hand_sizes)))
     out(f"Seat {game.decision.seat} starts.")
     shown = 0
+    ded = Deduction.for_seat(game, human_seat)
     while not game.done:
         if game.decision.seat == human_seat:
+            ded.sync(game.events_for(human_seat))
+            if game.decision.phase == SUGGEST:
+                out(knowledge_view(ded))
             a = ask(game, inp, out)
         else:
             a = random_legal(game, rng)
