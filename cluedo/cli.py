@@ -1,4 +1,4 @@
-"""Text CLI: a human takes one Seat against random-legal Seats.
+"""Text CLI: a human takes one Seat against Bots (or uniform-random Seats).
 
     python -m cluedo.cli --players 4 --seed 1 [--seat 0]
 """
@@ -9,6 +9,7 @@ import json
 import random
 
 from .core import ACCUSE, SUGGEST, Game, random_legal
+from .core.bots import parse_bot
 from .core.cards import CARD_NAMES, CATS
 from .core.deduction import Deduction
 
@@ -80,7 +81,29 @@ def ask(game, inp, out):
         out("Illegal action")
 
 
-def play(game, human_seat, rng, inp=input, out=print):
+class UniformPlayer:
+    """Uniform over legal actions (the old default Opponent; accuses wildly)."""
+
+    def __init__(self, rng):
+        self.rng = rng
+
+    def act(self, game):
+        return random_legal(game, self.rng)
+
+
+def seat_opponents(game, human_seat, specs, rng):
+    """{seat: player} for every Seat but the human's. `specs` (Bot specs such as
+    'cand/smart/gamble2', or 'uniform') are dealt to the other Seats in order, cycling."""
+    others = [s for s in range(game.n) if s != human_seat]
+    out = {}
+    for i, seat in enumerate(others):
+        spec = specs[i % len(specs)]
+        out[seat] = (UniformPlayer(rng) if spec == "uniform"
+                     else parse_bot(spec).player(game, seat, rng))
+    return out
+
+
+def play(game, human_seat, rng, inp=input, out=print, opponents=None):
     out(f"You are Seat {human_seat} of {game.n}. Hand: {fmt_cards(sorted(game.hands[human_seat]))}")
     out("Hand sizes: " + ", ".join(f"S{i}={n}" for i, n in enumerate(game.hand_sizes)))
     out(f"Seat {game.decision.seat} starts.")
@@ -93,7 +116,8 @@ def play(game, human_seat, rng, inp=input, out=print):
                 out(knowledge_view(ded))
             a = ask(game, inp, out)
         else:
-            a = random_legal(game, rng)
+            a = (opponents[game.decision.seat].act(game) if opponents
+                 else random_legal(game, rng))
         game.apply(a)
         view = game.events_for(human_seat)  # public record plus what I was shown
         for e in view[shown:]:
@@ -110,11 +134,16 @@ def main(argv=None):
     p.add_argument("--players", type=int, default=4)
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--seat", type=int, default=0)
+    p.add_argument("--opponents", default="cand/smart/certain",
+                   help="comma-separated Bot specs suggest/reveal/accuse (e.g. "
+                        "focused/smart/gamble2) dealt to the other Seats in order, or 'uniform'")
     p.add_argument("--log", help="write the Game log JSON here")
     args = p.parse_args(argv)
     seed = args.seed if args.seed is not None else random.randrange(2**31)
     game = Game.new(args.players, seed)
-    play(game, args.seat, random.Random(seed + 1))
+    rng = random.Random(seed + 1)
+    opponents = seat_opponents(game, args.seat, args.opponents.split(","), rng)
+    play(game, args.seat, rng, opponents=opponents)
     if args.log:
         with open(args.log, "w") as f:
             json.dump(game.log(), f)
