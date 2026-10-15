@@ -222,3 +222,24 @@ def test_cli_human_plays_to_the_end():
     assert game.done
     assert any("Game over" in line for line in lines)
     assert game.outcome["reason"] in ("win", "all_eliminated")
+
+
+def test_cli_seats_bots_as_opponents():
+    from cluedo.cli import play, seat_opponents
+    game = Game.new(4, 9)
+    lines = []
+
+    def inp(prompt):
+        if prompt.startswith("suggest"):
+            return "0 0 0"
+        if prompt.startswith("accuse"):
+            return "{} {} {}".format(*[c - o for c, o in zip(game.envelope, (0, 6, 12))])
+        return str(sorted(game._reveal_options)[0])
+
+    opponents = seat_opponents(game, 0, ["cand/smart/gamble2", "focused/smart/certain"],
+                               random.Random(0))
+    assert set(opponents) == {1, 2, 3}
+    play(game, 0, random.Random(0), inp=inp, out=lines.append, opponents=opponents)
+    assert game.done
+    # Bots play legal actions only (apply would have raised) and appear in the narration.
+    assert any(line.startswith("Seat 1 suggests") for line in lines)
