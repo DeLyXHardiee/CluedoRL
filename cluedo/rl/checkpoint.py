@@ -55,6 +55,9 @@ def load_checkpoint(path) -> Checkpoint:
 class PolicyPlayer:
     """A policy playing one Seat: encodes that Seat's view, samples a legal action."""
 
+    TOP_K = 5
+    last_probs: list | None = None  # [(action tuple, probability)] of the latest act()
+
     def __init__(self, actor, game, seat: int, blind: bool, greedy: bool = False):
         self.actor, self.seat, self.greedy = actor, seat, greedy
         self.enc = SeatEncoder(game, seat, blind=blind)
@@ -65,4 +68,7 @@ class PolicyPlayer:
                          "action_mask": torch.from_numpy(self.enc.mask())}, [])
         dist = self.actor.get_dist(td)
         a = int(dist.logits.argmax(-1)) if self.greedy else int(dist.sample())
+        p = torch.softmax(dist.logits, -1)  # for Game logs: the top few legal actions and their probability
+        top = p.topk(min(self.TOP_K, p.numel()))
+        self.last_probs = [(CluedoEnv._to_core(int(i)), float(v)) for v, i in zip(top.values, top.indices) if v > 0]
         return CluedoEnv._to_core(a)

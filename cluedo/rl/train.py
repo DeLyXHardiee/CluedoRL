@@ -62,6 +62,9 @@ def _evaluate(actor, blind, cfg, logger, step, seed, baseline=False):
     res = evaluation.evaluate_actor(actor, blind, cfg.eval_players, cfg.eval_games, seed, cfg.workers)
     for (field, n), r in res.items():
         logger.scalar(f"eval/win_rate/{field}/{n}p", r.win_rate, step)
+    for n, m in evaluation.behaviour_rates(actor, blind, cfg.eval_players, max(1, cfg.eval_games // 8), seed).items():
+        logger.scalar(f"eval/bluff_rate/{n}p", m.bluff_rate, step)
+        logger.scalar(f"eval/anchor_rate/{n}p", m.anchor_rate, step)
     if baseline:
         for n in cfg.eval_players:
             b = evaluation.random_suggest_baseline(n, cfg.eval_games, seed, cfg.workers)
