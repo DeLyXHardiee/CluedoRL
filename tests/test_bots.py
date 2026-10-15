@@ -43,7 +43,8 @@ def play_with_bots(spec, n, seed, watch=None):
 
 @pytest.mark.parametrize("n", [3, 4, 5, 6])
 @pytest.mark.parametrize("spec", ["random/smart/certain", "cand/smart/gamble2",
-                                  "focused/random/gamble3", "bluff/smart/gamble3"])
+                                  "focused/random/gamble3", "bluff/smart/gamble3",
+                                  "reader/smart/reader"])
 def test_bots_play_only_legal_actions_and_accuse_only_candidates(spec, n):
     for seed in range(8):
         game, accusations = play_with_bots(spec, n, seed)
@@ -181,3 +182,36 @@ def test_parse_bot_names_and_errors():
         parse_bot("nonsense/smart/certain")
     with pytest.raises(ValueError):
         parse_bot("cand/smart")
+
+
+# ---- reader bot (reads Public history) --------------------------------
+
+def reader_table(spec="reader/smart/reader"):
+    """Seat 2 is the reader. Seats 0 and 1 have both named suspect 1, weapon 7, room 12
+    (seat 0 holds 1 and 7, the room is in the Envelope); nobody named the other cards."""
+    g = scripted()
+    drive(g, ("suggest", 1, 7, 12), ("pass",),
+          ("suggest", 1, 7, 12), ("reveal", 1), ("pass",))
+    assert g.decision.seat == 2
+    return g
+
+
+def test_reader_is_available_like_any_other_bot():
+    assert parse_bot("reader/smart/reader").name == "reader/smart/reader"
+
+
+def test_reader_suggests_the_most_named_candidates():
+    for seed in range(20):
+        g = reader_table()
+        p = parse_bot("reader/smart/reader").player(g, 2, random.Random(seed))
+        assert p.act(g) == ("suggest", 1, 7, 12)
+
+
+def test_reader_ignores_its_own_suggestions_when_counting():
+    g = scripted()
+    drive(g, ("suggest", 1, 7, 12), ("pass",))
+    drive(g, ("suggest", 0, 8, 13), ("pass",))   # seat 1 names 0, 8, 13 (pass: nobody answers)
+    p = parse_bot("reader/smart/reader").player(g, 2, random.Random(0))
+    a = p.act(g)
+    assert a[0] == "suggest"
+    assert set(a[1:]) <= {1, 0, 7, 8, 12, 13}
