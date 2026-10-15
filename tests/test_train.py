@@ -35,6 +35,14 @@ def test_logger_is_injectable_so_later_metrics_share_the_same_stream(tmp_path):
     assert any(name == "train/entropy" for name, _, _ in log.records)
 
 
+def test_training_logs_bluff_and_anchor_rate(tmp_path):
+    log = RecordingLogger()
+    train(_tiny(total_frames=500), "ppo-fb", tmp_path, logger=log)
+    names = {name for name, _, _ in log.records}
+    assert {"eval/bluff_rate/4p", "eval/anchor_rate/4p"} <= names
+    assert all(0 <= v <= 1 for n, v, _ in log.records if n.startswith(("eval/bluff", "eval/anchor")))
+
+
 def test_unknown_condition_is_rejected():
     with pytest.raises(ValueError):
         condition("nope")

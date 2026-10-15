@@ -55,7 +55,7 @@ def test_steps_carry_public_consequences_and_annotation_slot():
     data = build_replay(log)
     texts = [t for s in data["steps"] for t in s["events"]]
     assert any("suggests" in t for t in texts)
-    assert all(s["annotations"] == {} for s in data["steps"])
+    assert all(isinstance(s["annotations"], dict) for s in data["steps"])
 
 
 @pytest.mark.parametrize("n", [3, 4, 5, 6])
@@ -74,3 +74,23 @@ def test_truncated_game_replays():
     data = build_replay(log)
     assert data["outcome"]["truncated"]
     assert "Candidates" in render_html(data)
+
+
+def test_replay_flags_bluffs_and_probes_for_every_seat_without_a_learner():
+    from tests.test_metrics import log_a
+    data = build_replay(log_a())
+    flags = {s["index"]: s["annotations"]["flags"] for s in data["steps"] if "flags" in s["annotations"]}
+    assert flags[1] == ["bluff"]  # step 1 = first action (Seat 0's Suggestion)
+    assert any(sorted(f) == ["bluff", "probe"] for f in flags.values())
+
+
+def test_replay_shows_learner_action_probabilities_from_the_log():
+    from tests.test_metrics import log_a
+    log = log_a()
+    log["learner"] = 0
+    log["actions"][0]["probs"] = [[["suggest", 1, 8, 20], 0.6], [["suggest", 1, 8, 14], 0.1]]
+    data = build_replay(log)
+    probs = data["steps"][1]["annotations"]["probs"]
+    assert probs[0][1] == 0.6 and "suggest" in probs[0][0].lower()
+    assert "probs" not in data["steps"][2]["annotations"]
+    assert "probs" in render_html(data)

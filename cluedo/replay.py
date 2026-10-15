@@ -5,9 +5,9 @@
 Per-Seat views are rebuilt by replaying the log through the core `Game` and one
 `Deduction` engine per Seat (no rules are re-implemented here).
 
-Each step of `build_replay(log)["steps"]` has an `annotations` dict (empty for now):
-a place for later per-step extras (Bluff/Anchor/Probe flags, Learner action
-probabilities). Whatever is put there is rendered as key/value rows by the page.
+Each step of `build_replay(log)["steps"]` has an `annotations` dict, rendered as rows by the page:
+`flags` (bluff/anchor/probe on Suggestions), `info_gain_bits`, `candidates_left` (Accusations) and,
+when the log has `learner` and per-action `probs`, the Learner's top action probabilities.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from .cli import describe, fmt_cards
 from .core import Game
 from .core.cards import CARD_NAMES
 from .core.deduction import Deduction
+from .core.metrics import analyse
 
 OMNISCIENT = "omniscient"
 
@@ -59,6 +60,27 @@ def _views(game, engines):
     return views
 
 
+def _annotate(log, steps):
+    """Behaviour flags (bluff/anchor/probe, see cluedo.core.metrics) on each Suggestion, for the
+    log's Learner (`log["learner"]`) or else every Seat; plus the Learner's action probabilities
+    (`actions[i]["probs"]` = [[action, p], ...], recorded by cluedo.rl.evaluation.logged_game)."""
+    learner = log.get("learner")
+    for seat in ([learner] if learner is not None else range(len(log["hands"]))):
+        for rec in analyse(log, seat):
+            ann = steps[rec["index"] + 1]["annotations"]
+            if rec["flags"]:
+                ann["flags"] = rec["flags"]
+            if "info_gain" in rec:
+                ann["info_gain_bits"] = round(rec["info_gain"], 3)
+            if "candidates" in rec:
+                ann["candidates_left"] = rec["candidates"]
+    if learner is not None:
+        for i, a in enumerate(log["actions"]):
+            if a.get("probs"):
+                steps[i + 1]["annotations"]["probs"] = [
+                    [_describe_action(a["seat"], tuple(act)), round(p, 4)] for act, p in a["probs"]]
+
+
 def build_replay(log: dict) -> dict:
     """Step data for a Game log. Step 0 is the deal; step k is the state after action k."""
     g = Game([frozenset(h) for h in log["hands"]], log["envelope"], log["start_seat"],
@@ -81,6 +103,7 @@ def build_replay(log: dict) -> dict:
         action = tuple(a["action"])
         g.apply(action)
         steps.append(step(i, a["seat"], list(action), d.phase))
+    _annotate(log, steps)
     return {"version": 1, "n_players": g.n, "seed": log.get("seed"),
             "card_names": list(CARD_NAMES), "hands": log["hands"],
             "envelope": log["envelope"], "outcome": g.outcome, "steps": steps}
@@ -141,8 +164,11 @@ function draw() {
       s.eliminated.map((x, k) => x ? "Seat " + k : null).filter(x => x).join(", ") + "</span>" : "");
   $("events").innerHTML = s.events.map(e => "<div>" + esc(e) + "</div>").join("");
   const ann = Object.entries(s.annotations);
+  const badge = f => "<b style='border:1px solid var(--line);border-radius:4px;padding:0 6px;margin-right:4px'>" + esc(f.toUpperCase()) + "</b>";
+  const cell = (k, x) => k === "flags" ? x.map(badge).join("") : k === "probs" ?
+    x.map(([t, p]) => esc(t) + " <span class='mut'>" + (100 * p).toFixed(1) + "%</span>").join("<br>") : esc(JSON.stringify(x));
   $("ann").innerHTML = ann.length ? "<table>" + ann.map(([k, x]) =>
-    "<tr><th>" + esc(k) + "</th><td>" + esc(JSON.stringify(x)) + "</td></tr>").join("") + "</table>" : "";
+    "<tr><th>" + esc(k) + "</th><td style='text-align:left'>" + cell(k, x) + "</td></tr>").join("") + "</table>" : "";
   const counts = Array.from({length: n}, (_, k) => "Seat " + k + ": " + s.views[k].candidate_count);
   $("cand").innerHTML = view === "omniscient" ? "Candidates per Seat - " + counts.join(", ")
     : "Candidates: <b>" + v.candidate_count + "</b> &middot; open clauses: " + v.open_clauses.length +

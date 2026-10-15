@@ -55,6 +55,9 @@ def load_checkpoint(path) -> Checkpoint:
 class PolicyPlayer:
     """A policy playing one Seat: encodes that Seat's view, samples a legal action."""
 
+    TOP_K = 5
+    last_probs: list | None = None  # [(action tuple, probability)] of the latest act()
+
     def __init__(self, actor, game, seat: int, blind: bool, greedy: bool = False):
         from torchrl.modules import MLP
         self.actor, self.seat, self.greedy = actor, seat, greedy
@@ -65,5 +68,8 @@ class PolicyPlayer:
     def act(self, game):
         logits = self.net(torch.from_numpy(self.enc.observation()))
         logits = logits.masked_fill(~torch.from_numpy(self.enc.mask()), float("-inf"))
-        a = int(logits.argmax()) if self.greedy else int(torch.multinomial(torch.softmax(logits, -1), 1))
+        p = torch.softmax(logits, -1)
+        a = int(logits.argmax()) if self.greedy else int(torch.multinomial(p, 1))
+        top = p.topk(min(self.TOP_K, p.numel()))  # for Game logs: top few legal actions and their probability
+        self.last_probs = [(CluedoEnv._to_core(int(i)), float(v)) for v, i in zip(top.values, top.indices) if v > 0]
         return CluedoEnv._to_core(a)
