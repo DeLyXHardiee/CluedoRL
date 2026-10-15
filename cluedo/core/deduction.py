@@ -13,12 +13,18 @@ from itertools import product
 from .cards import CATS, NCARDS
 
 
+DEFAULT_K = 12  # exact Candidate check runs when the propagated count is <= K (see results/)
+
+
 class Contradiction(Exception):
     """The observations cannot all be true (a bug in the engine, the feed or the rules)."""
 
 
 class Deduction:
-    def __init__(self, n_players, me, hand, hand_sizes):
+    def __init__(self, n_players, me, hand, hand_sizes, k=DEFAULT_K):
+        self.k = k
+        self._version = 0                # bumped on every observation (cache key)
+        self._exact_cache = None         # (version, frozenset of exact Candidates)
         self.n = n_players
         self.me = me
         self.sizes = list(hand_sizes) + [3]
@@ -38,9 +44,9 @@ class Deduction:
         self._propagate()
 
     @classmethod
-    def for_seat(cls, game, seat):
+    def for_seat(cls, game, seat, k=DEFAULT_K):
         """Engine for `seat` of a Game, with nothing observed yet (call sync() to catch up)."""
-        return cls(game.n, seat, game.hands[seat], game.hand_sizes)
+        return cls(game.n, seat, game.hands[seat], game.hand_sizes, k=k)
 
     # ------------------------------------------------------------------ feeding
 
@@ -73,6 +79,7 @@ class Deduction:
             else:
                 self._env_clauses.add(cards)
         self._propagate()
+        self._version += 1
 
     # ------------------------------------------------------------------ queries
 
@@ -85,17 +92,98 @@ class Deduction:
         env = self.grid[self.n]
         return [[c for c in cat if env[c] != 0] for cat in CATS]
 
-    def candidates(self):
-        """All Candidates (s, w, r), in itertools.product order."""
+    def loose_candidates(self):
+        """Candidates from constraint propagation alone, in itertools.product order."""
         return [t for t in product(*self.category_candidates()) if t not in self._env_clauses]
 
+    def loose_count(self):
+        k = 1
+        for cat in self.category_candidates():
+            k *= len(cat)
+        return k - len(self._env_clauses)
+
+    def candidates(self):
+        """All Candidates (s, w, r), in itertools.product order.
+
+        Exact when the propagated count is <= K, otherwise propagation only (ADR 0002).
+        """
+        if self.loose_count() > self.k:
+            return self.loose_candidates()
+        return self.exact_candidates()
+
+    def exact_candidates(self):
+        """Candidates that survive the exact consistency check, whatever K is (can be slow
+        when many Candidates remain)."""
+        loose = self.loose_candidates()
+        exact = self._exact_set(loose)
+        return [t for t in loose if t in exact]
+
     def candidate_count(self):
+        if self.loose_count() > self.k:
+            return self.loose_count()
         return len(self.candidates())
 
     def is_candidate(self, triple):
         triple = tuple(triple)
-        return triple not in self._env_clauses and all(
-            self.grid[self.n][c] != 0 for c in triple)
+        if triple in self._env_clauses or not all(self.grid[self.n][c] != 0 for c in triple):
+            return False
+        if self.loose_count() > self.k:
+            return True
+        return triple in self._exact_set(self.loose_candidates())
+
+    def _exact_set(self, loose):
+        if self._exact_cache is None or self._exact_cache[0] != self._version:
+            self._exact_cache = (self._version, frozenset(t for t in loose if self._feasible(t)))
+        return self._exact_cache[1]
+
+    def _feasible(self, env):
+        """Is there a full deal, consistent with every observation, whose Envelope is `env`?
+
+        Backtracking over the cards nobody is known to hold: hand sizes and the open
+        at-least-one clauses must all be satisfiable (the Envelope clauses are moot once
+        the Envelope is fixed to a Candidate).
+        """
+        n, grid, sizes = self.n, self.grid, self.sizes
+        cap = [sizes[p] - grid[p].count(1) for p in range(n)]
+        free = {}
+        for c in range(NCARDS):
+            if c in env or any(grid[p][c] == 1 for p in range(n)):
+                continue
+            free[c] = [p for p in range(n) if grid[p][c] is None and cap[p] > 0]
+            if not free[c]:
+                return False
+        clauses = [(p, [c for c in cards if c in free and p in free[c]])
+                   for p, cards in self._clauses]
+        if any(not live for _, live in clauses):
+            return False
+        if sum(cap) != len(free):
+            return False
+
+        def search(free, cap, clauses):
+            if not free:
+                return all(cap[p] == 0 for p in range(n)) and not clauses
+            for p, live in clauses:
+                if not any(c in free and p in free[c] for c in live):
+                    return False
+            for p in range(n):
+                if cap[p] > sum(1 for c in free if p in free[c]):
+                    return False
+            # most constrained card first
+            c = min(free, key=lambda x: len(free[x]))
+            rest = {x: o for x, o in free.items() if x != c}
+            for p in free[c]:
+                cap[p] -= 1
+                nxt = rest
+                if cap[p] == 0:
+                    nxt = {x: [q for q in o if q != p] for x, o in rest.items()}
+                nclauses = [(q, live) for q, live in clauses if not (q == p and c in live)]
+                if search(nxt, cap, nclauses):
+                    cap[p] += 1
+                    return True
+                cap[p] += 1
+            return False
+
+        return search(free, cap, clauses)
 
     def open_clauses(self):
         """Unresolved pass/answer clauses: (seat, frozenset(cards)) meaning seat holds >= 1 of them."""

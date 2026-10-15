@@ -9,3 +9,6 @@ simulator_gap_analysis.md
 __pycache__/
 .venv/
 .pytest_cache/
+
+# Claude Code local state
+.claude/
