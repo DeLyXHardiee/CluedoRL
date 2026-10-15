@@ -4,6 +4,7 @@ Actor: MLP -> logits -> MaskedCategorical (mask = "action_mask"). Critic: MLP ->
 """
 from __future__ import annotations
 
+import torch
 from tensordict.nn import TensorDictModule
 from torch import nn
 from torchrl.modules import MLP, MaskedCategorical, ProbabilisticActor, ValueOperator
@@ -13,8 +14,12 @@ from torchrl.objectives.value import GAE
 from cluedo import contract as C
 
 
-def make_actor(hidden: int = 256, depth: int = 2) -> ProbabilisticActor:
+def make_actor(hidden: int = 256, depth: int = 2, pass_bias: float = 0.0) -> ProbabilisticActor:
+    """`pass_bias` raises the initial pass logit: at the start of a game all 324 Accusations are legal, so a
+    uniform init would accuse (and die) on turn one and sparse reward could not teach otherwise."""
     net = MLP(in_features=C.OBS_DIM, out_features=C.N_ACTIONS, num_cells=[hidden] * depth, activation_class=nn.Tanh)
+    with torch.no_grad():
+        net[-1].bias[C.PASS_ACTION] += pass_bias
     logits = TensorDictModule(net, in_keys=["observation"], out_keys=["logits"])
     return ProbabilisticActor(
         module=logits,
