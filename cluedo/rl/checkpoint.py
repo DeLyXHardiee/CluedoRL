@@ -59,16 +59,17 @@ class PolicyPlayer:
     last_probs: list | None = None  # [(action tuple, probability)] of the latest act()
 
     def __init__(self, actor, game, seat: int, blind: bool, greedy: bool = False):
+        from torchrl.modules import MLP
         self.actor, self.seat, self.greedy = actor, seat, greedy
+        self.net = next(m for m in actor.modules() if isinstance(m, MLP))  # bypass TensorDict overhead
         self.enc = SeatEncoder(game, seat, blind=blind)
 
     @torch.no_grad()
     def act(self, game):
-        td = TensorDict({"observation": torch.from_numpy(self.enc.observation()),
-                         "action_mask": torch.from_numpy(self.enc.mask())}, [])
-        dist = self.actor.get_dist(td)
-        a = int(dist.logits.argmax(-1)) if self.greedy else int(dist.sample())
-        p = torch.softmax(dist.logits, -1)  # for Game logs: the top few legal actions and their probability
-        top = p.topk(min(self.TOP_K, p.numel()))
+        logits = self.net(torch.from_numpy(self.enc.observation()))
+        logits = logits.masked_fill(~torch.from_numpy(self.enc.mask()), float("-inf"))
+        p = torch.softmax(logits, -1)
+        a = int(logits.argmax()) if self.greedy else int(torch.multinomial(p, 1))
+        top = p.topk(min(self.TOP_K, p.numel()))  # for Game logs: top few legal actions and their probability
         self.last_probs = [(CluedoEnv._to_core(int(i)), float(v)) for v, i in zip(top.values, top.indices) if v > 0]
         return CluedoEnv._to_core(a)

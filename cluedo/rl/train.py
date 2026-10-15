@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import functools
+import os
 import time
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from cluedo.rl.checkpoint import save_checkpoint
 from cluedo.rl.config import TrainConfig, condition as get_condition
 from cluedo.rl.env import CluedoEnv
 from cluedo.rl.ppo_stack import make_actor, make_critic, make_loss
+from cluedo.rl.selfplay import CheckpointPool
 
 
 class RecordingLogger:
@@ -53,6 +55,7 @@ class TensorBoardLogger:
 
 
 def make_env(condition_name: str, cfg: TrainConfig, seed: int) -> CluedoEnv:
+    torch.set_num_threads(1)  # runs inside env workers: one thread each, one worker per core
     cond = get_condition(condition_name)
     return CluedoEnv(opponents=cond.make_opponents(cfg), blind=cond.blind, turn_cap=cfg.turn_cap, seed=seed)
 
@@ -82,6 +85,8 @@ def train(cfg: TrainConfig, condition_name: str, out_dir, logger=None, verbose: 
     (out / "checkpoints").mkdir(parents=True, exist_ok=True)
     own_logger = logger is None
     logger = logger or TensorBoardLogger(out / "tb")
+    if cond.self_play and not cfg.pool_dir:
+        cfg = dataclasses.replace(cfg, pool_dir=str(out / "pool"))
     (out / "config.txt").write_text(f"condition={condition_name}\n{cfg}\n")
 
     torch.manual_seed(cfg.seed)
@@ -89,17 +94,26 @@ def train(cfg: TrainConfig, condition_name: str, out_dir, logger=None, verbose: 
     loss_mod, advantage = make_loss(actor, critic, cfg.gamma, cfg.lmbda, cfg.clip_epsilon, cfg.entropy_coeff)
     optim = torch.optim.Adam(loss_mod.parameters(), lr=cfg.lr)
 
+    pool = None
+    if cond.self_play:  # workers read Opponent weights from files; publish before they start
+        pool = CheckpointPool(cfg.pool_dir, cfg, condition_name, cond.blind, size=cfg.pool_size)
+        pool.publish_latest(actor, critic, 0)
+        pool.add(actor, critic, 0)
+
     env_fns = [functools.partial(make_env, condition_name, cfg, cfg.seed * 10_000 + i)
                for i in range(cfg.workers)]
     collector = MultiSyncCollector(env_fns, actor, frames_per_batch=cfg.frames_per_batch,
                                    total_frames=cfg.total_frames, device="cpu")
+
+    # the collector leaves the trainer at 1 torch thread; the update is compute-bound (~2x faster at 6)
+    torch.set_num_threads(cfg.update_threads or max(1, (os.cpu_count() or 2) // 2))
 
     def ckpt(step):
         p = out / "checkpoints" / f"step_{step:010d}.pt"
         save_checkpoint(p, actor, critic, cfg, condition_name, step, blind=cond.blind)
         return p
 
-    steps, next_eval, next_ckpt, t0 = 0, 0, cfg.checkpoint_every, time.time()
+    steps, next_eval, next_ckpt, next_pool, t0 = 0, 0, cfg.checkpoint_every, cfg.pool_every, time.time()
     last = None
     try:
         for batch in collector:
@@ -120,6 +134,11 @@ def train(cfg: TrainConfig, condition_name: str, out_dir, logger=None, verbose: 
                                    ("policy_loss", "loss_objective"), ("clip_fraction", "clip_fraction")):
                         stats[k].append(float(loss[key].detach()))
             collector.update_policy_weights_()
+            if pool is not None:
+                pool.publish_latest(actor, critic, steps)
+                if steps >= next_pool:
+                    pool.add(actor, critic, steps)
+                    next_pool += cfg.pool_every
             for k, v in stats.items():
                 logger.scalar(f"train/{k}", sum(v) / len(v), steps)
             done = batch["next", "done"].squeeze(-1)

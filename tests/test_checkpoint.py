@@ -41,3 +41,20 @@ def test_checkpoint_plays_legal_complete_games_as_a_player(tmp_path):
         game.apply(players[game.decision.seat].act(game))  # an illegal action would raise
         n += 1
     assert n > 0
+
+
+def test_policy_player_samples_the_actors_masked_distribution_and_greedy_is_its_argmax():
+    from cluedo.rl.checkpoint import PolicyPlayer
+    from cluedo.rl.env import CluedoEnv
+    cfg = TrainConfig(hidden=32, depth=1)
+    actor, _ = _make(cfg)
+    game = Game.new(4, seed=5, max_turns=60)
+    seat = game.decision.seat
+    p = PolicyPlayer(actor, game, seat, blind=False)
+    td = TensorDict({"observation": torch.from_numpy(p.enc.observation()),
+                     "action_mask": torch.from_numpy(p.enc.mask())}, [])
+    probs = actor.get_dist(td).probs
+    top = int(probs.argmax())
+    assert PolicyPlayer(actor, game, seat, False, greedy=True).act(game) == CluedoEnv._to_core(top)
+    draws = [p.act(game) for _ in range(4000)]
+    assert abs(draws.count(CluedoEnv._to_core(top)) / 4000 - float(probs[top])) < 0.04
