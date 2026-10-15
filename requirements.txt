@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1
+torchrl==0.14.1
+tensordict==0.14.3
+numpy
+pytest
+matplotlib
+tensorboard

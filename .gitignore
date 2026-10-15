@@ -7,3 +7,5 @@ simulator_gap_analysis.md
 
 # Python
 __pycache__/
+.venv/
+.pytest_cache/
