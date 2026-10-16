@@ -53,6 +53,15 @@ def play_game(game, players):
     return game.outcome
 
 
+def play_table(factories, gseed):
+    """Play one game with `factories[seat].player(...)` on the deal `gseed` (bot rng seeded from it,
+    exactly as `evaluate` does). Returns the finished Game."""
+    game = Game.new(len(factories), gseed)
+    rng = random.Random(gseed + 1)
+    play_game(game, [f.player(game, s, rng) for s, f in enumerate(factories)])
+    return game
+
+
 def _run_chunk(args):
     test, base, n, start, stop, seed = args
     wins = turns = 0
