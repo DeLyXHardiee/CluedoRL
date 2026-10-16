@@ -10,7 +10,7 @@ class FakeView:
     def __init__(self, candidates, named, seat=0, by=1):
         self.seat, self.rng = seat, random.Random(0)
         self.ded = type("D", (), {"candidates": lambda s: candidates})()
-        self._events = [self.event(by, c) for c in named]
+        self.events = [self.event(by, c) for c in named]
 
     @staticmethod
     def event(seat, cards):
@@ -18,7 +18,7 @@ class FakeView:
                 "card": None, "passes": [], "automatic": False}
 
     def public_events(self):
-        return self._events
+        return self.events
 
 
 def test_reader_gambles_on_the_most_named_candidate():
@@ -40,5 +40,5 @@ def test_reader_accuses_the_single_candidate_whatever_was_named():
 def test_reader_ignores_its_own_suggestions_in_accusation_weights():
     cands = [(0, 6, 12), (0, 6, 13)]
     v = FakeView(cands, [(0, 6, 13)] * 3, seat=1, by=1)  # all named by the reader itself
-    v._events.append(v.event(2, (0, 6, 12)))
+    v.events.append(v.event(2, (0, 6, 12)))
     assert ACCUSE["reader"](v) == (0, 6, 12)

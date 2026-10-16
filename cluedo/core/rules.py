@@ -62,7 +62,7 @@ class Game:
         allcards = set(self.envelope).union(*self.hands)
         if (len(allcards) != NCARDS or sum(map(len, self.hands)) != 18
                 or [CAT_OF[e] for e in self.envelope] != [0, 1, 2]):
-            raise ValueError("deal must partition the 21 cards with one envelope card per category")
+            raise ValueError(f"deal must partition the {NCARDS} cards with one envelope card per category")
         self.seed = seed
         self.start_seat = start_seat
         self.max_turns = max_turns

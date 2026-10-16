@@ -38,6 +38,15 @@ class Result:
         return 1.96 * (p * (1 - p) / self.games) ** 0.5
 
 
+def map_chunks(fn, tasks, workers=1):
+    """`[fn(t) for t in tasks]`, over a process pool when workers > 1 (order preserved).
+    Shared by `evaluate` and the evaluation grid; fn and tasks must be picklable."""
+    if workers <= 1:
+        return [fn(t) for t in tasks]
+    with ProcessPoolExecutor(workers) as ex:
+        return list(ex.map(fn, tasks))
+
+
 def _as_bot(x):
     return parse_bot(x) if isinstance(x, str) else x
 
@@ -79,15 +88,9 @@ def _run_chunk(args):
 
 def evaluate(test, base, n_players, games, seed, workers=1):
     test, base = _as_bot(test), _as_bot(base)
-    if workers <= 1:
-        chunks = [(test, base, n_players, 0, games, seed)]
-        parts = [_run_chunk(chunks[0])]
-    else:
-        step = -(-games // (workers * 4))
-        chunks = [(test, base, n_players, a, min(a + step, games), seed)
-                  for a in range(0, games, step)]
-        with ProcessPoolExecutor(workers) as ex:
-            parts = list(ex.map(_run_chunk, chunks))
+    step = games if workers <= 1 else -(-games // (workers * 4))
+    chunks = [(test, base, n_players, a, min(a + step, games), seed) for a in range(0, games, step)]
+    parts = map_chunks(_run_chunk, chunks, workers)
     wins = sum(p[0] for p in parts)
     turns = sum(p[1] for p in parts)
     return Result(_name(test), n_players, games, wins, turns / games)

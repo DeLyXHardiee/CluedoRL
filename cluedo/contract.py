@@ -82,6 +82,17 @@ def decode_action(a: int) -> Action:
     return Action("reveal", (a - REVEAL_START,))
 
 
+def to_core_action(a) -> tuple:
+    """A contract action (index or `Action`) -> the tuple `Game.apply` takes:
+    ('suggest'|'accuse', s, w, r), ('reveal', card) or ('pass',)."""
+    act = a if isinstance(a, Action) else decode_action(a)
+    if act.kind == "pass":
+        return ("pass",)
+    if act.kind == "reveal":
+        return ("reveal", act.cards[0])
+    return (act.kind, *act.cards)
+
+
 def phase_of_action(a: int) -> int:
     a = int(a)
     if a < ACCUSE_START:
@@ -162,7 +173,8 @@ _SPEC = [
     ("shown_to", (MAX_SEATS, N_CARDS), True),  # 1 if Learner showed this card to that Seat
     ("last_cards", (N_CARDS,), True),  # multi-hot last Suggestion
     ("last_asker", (MAX_SEATS,), True),  # one-hot
-    ("last_answerer", (MAX_SEATS + 1,), True),  # one-hot, index 6 = nobody answered / none yet
+    ("last_answerer", (MAX_SEATS + 1,), True),  # one-hot over Seats 0-5; index 6 = nobody answered / none yet.
+    # Note index 6 equals ENVELOPE / N_OWNERS-1 elsewhere but here is NOT an owner; the layout is frozen.
 ]
 
 SLICES: dict[str, Slice] = {}

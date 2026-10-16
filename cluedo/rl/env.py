@@ -4,6 +4,11 @@ Per episode: player count uniform 3-6, random Learner Seat, Game dealt from the 
 Opponents from an OpponentSource (default: the PPO-FB Bot field). Reward +1 if the Learner wins,
 else 0. Terminates on game end or Learner elimination; truncates at the Turn cap.
 `blind=True` zeroes Public history in the observation (PPO-SP-blind).
+
+`reset()` discards and resamples the whole episode (Game, Learner Seat, Opponents) when an Opponent wins
+before the Learner's first decision, so every episode contains at least one Learner decision. Such
+instant-loss deals are therefore never trained on (they are excluded from the Learner's win-rate denominator
+in training; evaluation via arena/eval_grid plays every deal).
 """
 from __future__ import annotations
 
@@ -77,7 +82,7 @@ class CluedoEnv(EnvBase):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         g = self.game
-        g.apply(self._to_core(int(tensordict.get("action"))))
+        g.apply(C.to_core_action(int(tensordict.get("action"))))
         self._advance_opponents()
         out_reason = g.outcome["reason"] if g.done else None
         truncated = out_reason == "truncated"
@@ -87,14 +92,10 @@ class CluedoEnv(EnvBase):
         out.set("reward", torch.tensor([1.0 if won else 0.0], dtype=torch.float32))
         return out
 
-    @staticmethod
-    def _to_core(a: int) -> tuple:
-        act = C.decode_action(a)
-        if act.kind == "pass":
-            return ("pass",)
-        if act.kind == "reveal":
-            return ("reveal", act.cards[0])
-        return (act.kind, *act.cards)
+    @property
+    def opponent_players(self) -> dict:
+        """{seat: player} of the current episode's Opponents (read-only view)."""
+        return dict(self._players)
 
     def rand_action(self, tensordict=None):
         """Uniform over legal actions (used by rollout()/check_env_specs without a policy)."""

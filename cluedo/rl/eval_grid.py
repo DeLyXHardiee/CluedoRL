@@ -2,7 +2,7 @@
 
     conditions = {"ppo-fb": checkpoint_entrant("ppo-fb", "runs/fb/checkpoints/step_..pt"), ...}
     tables = run_grid(conditions, EvalConfig(games=3000, seeds=(0, 1, 2)), workers=12)
-    write_tables(tables, "results/eval")        # games.csv cells.csv comparisons.csv metrics.csv
+    write_tables(tables, "results/eval")        # games.csv cells.csv comparisons.csv metrics.csv bluff_anchor.csv
 
 Two kinds of table:
 - homogeneous fields: one model (Entrant) vs n-1 copies of one Opponent Bot, the model's Seat rotated
@@ -13,6 +13,23 @@ Game g of seed s is always the deal ``s * 1_000_003 + g`` (``arena`` convention)
 plays the same deals with the same rotation: comparisons are paired. Seeds stay separate rows.
 Games are played by ``arena.play_table``; results do not depend on the worker count.
 Schemas: see the module-level ``*_COLUMNS`` constants.
+
+Truncation (spec story 10): a game that hits the Turn cap has no winner. It counts as a loss for every
+Entrant, and is reported, not hidden: ``games.csv`` has a ``truncated`` flag per row, ``cells.csv`` the
+``truncated`` count and ``truncation_rate`` per cell, ``metrics.csv`` the ``truncation_rate`` over the
+measured games. A nonzero rate means win rates in that cell understate every Entrant.
+
+Statistics. ``comparisons.csv`` has one row per pair of Entrants within a cell, on the games both played:
+- mixed-table and homogeneous comparisons alike are McNemar's exact test on the discordant games, i.e.
+  those where exactly one of the two Entrants won (``a_only``, ``b_only``); in a mixed table the two
+  Entrants sit at the same table in the same game, so at most one of them can win;
+- ``diff`` is (a_only - b_only) / games with a normal 95% interval;
+- the Holm family for ``p_holm`` is ALL comparisons within one seed (every table, field, player count and
+  pair), not per cell; seeds are separate families.
+
+``bluff_anchor.csv`` (spec story 45): pooled Bluff and Anchor rate per Suggestion per Condition (homogeneous
+cells, Bots excluded; Wilson CI) and, when both ``ppo-sp`` and ``ppo-sp-blind`` are present, their difference
+with a normal 95% CI.
 """
 from __future__ import annotations
 
@@ -20,7 +37,6 @@ import csv
 import itertools
 import os
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -35,13 +51,15 @@ HELD_OUT = {"bluff": "bluff/smart/certain", "reader": "reader/smart/reader",
 TRAINING_BOTS = {f"{s}/{a}": f"{s}/smart/{a}" for s in ("cand", "focused") for a in ("certain", "gamble2")}
 OPPONENTS = {**TRAINING_BOTS, **HELD_OUT}  # name -> Bot spec; the `field` column holds the name
 
-GAMES_COLUMNS = ["table", "field", "n_players", "seed", "game", "deal_seed", "entrant", "seat", "win", "turns"]
+GAMES_COLUMNS = ["table", "field", "n_players", "seed", "game", "deal_seed", "entrant", "seat", "win", "turns",
+                 "truncated"]
 CELLS_COLUMNS = ["table", "field", "n_players", "seed", "entrant", "games", "wins", "win_rate",
-                 "ci_lo", "ci_hi", "chance", "mean_turns"]
+                 "ci_lo", "ci_hi", "chance", "mean_turns", "truncated", "truncation_rate"]
+BLUFF_ANCHOR_COLUMNS = ["measure", "entrant", "suggestions", "count", "rate", "ci_lo", "ci_hi"]
 COMPARISON_COLUMNS = ["table", "field", "n_players", "seed", "a", "b", "games", "a_only", "b_only", "diff",
                       "diff_lo", "diff_hi", "p", "p_holm"]
 _METRIC_COUNTS = [f.name for f in fields(Metrics) if f.name not in ("accusation_candidates", "info_gains")]
-METRICS_COLUMNS = (["table", "field", "n_players", "seed", "entrant", "games_measured"] + _METRIC_COUNTS +
+METRICS_COLUMNS = (["table", "field", "n_players", "seed", "entrant", "games_measured", "truncation_rate"] + _METRIC_COUNTS +
                    ["bluff_rate", "anchor_rate", "probe_rate", "accusation_accuracy",
                     "mean_accusation_candidates", "mean_info_gain", "reshow_rate", "leakage",
                     "accusation_candidates"])  # last: space-separated Candidates left at each Accusation
@@ -99,6 +117,7 @@ class Tables:
     cells: list
     comparisons: list
     metrics: list
+    bluff_anchor: list
 
 
 # ------------------------------------------------------------------ playing
@@ -131,7 +150,8 @@ def _run_task(task):
         for s in recorded:
             rows.append({"table": table, "field": fld, "n_players": n, "seed": seed, "game": g,
                          "deal_seed": dseed, "entrant": seats[s].name, "seat": s,
-                         "win": int(out["winner"] == s), "turns": out["turns"]})
+                         "win": int(out["winner"] == s), "turns": out["turns"],
+                         "truncated": int(out["truncated"])})
             if log is not None:
                 m, c = metrics.get(seats[s].name, (Metrics(), 0))
                 metrics[seats[s].name] = (m + behaviour_metrics(log, s), c + 1)
@@ -159,18 +179,19 @@ def _tasks(conditions, cfg):
 # ------------------------------------------------------------------ statistics
 
 def _cells(games):
-    acc = defaultdict(lambda: [0, 0, 0])
+    acc = defaultdict(lambda: [0, 0, 0, 0])
     for r in games:
         a = acc[(r["table"], r["field"], r["n_players"], r["seed"], r["entrant"])]
         a[0] += 1
         a[1] += r["win"]
         a[2] += r["turns"]
+        a[3] += r["truncated"]
     out = []
-    for (t, f, n, seed, e), (g, w, turns) in acc.items():
+    for (t, f, n, seed, e), (g, w, turns, tr) in acc.items():
         lo, hi = wilson_ci(w, g)
         out.append({"table": t, "field": f, "n_players": n, "seed": seed, "entrant": e, "games": g,
                     "wins": w, "win_rate": w / g, "ci_lo": lo, "ci_hi": hi, "chance": 1 / n,
-                    "mean_turns": turns / g})
+                    "mean_turns": turns / g, "truncated": tr, "truncation_rate": tr / g})
     return out
 
 
@@ -197,10 +218,18 @@ def _comparisons(games):
     return out
 
 
-def _metric_rows(parts):
+def _metric_rows(parts, games, metric_games):
+    trunc = defaultdict(lambda: [0, 0])  # measured games and truncated ones, per cell
+    for r in games:
+        if r["game"] < metric_games:
+            k = trunc[(r["table"], r["field"], r["n_players"], r["seed"], r["entrant"])]
+            k[0] += 1
+            k[1] += r["truncated"]
     out = []
     for (t, f, n, seed, e), (m, c) in parts.items():
-        row = {"table": t, "field": f, "n_players": n, "seed": seed, "entrant": e, "games_measured": c}
+        measured, tr = trunc[(t, f, n, seed, e)]
+        row = {"table": t, "field": f, "n_players": n, "seed": seed, "entrant": e, "games_measured": c,
+               "truncation_rate": tr / measured if measured else 0.0}
         row.update({k: getattr(m, k) for k in _METRIC_COUNTS})
         row.update(m.summary())
         row["accusation_candidates"] = " ".join(str(c) for c in m.accusation_candidates)
@@ -208,14 +237,38 @@ def _metric_rows(parts):
     return out
 
 
+def _bluff_anchor(metrics):
+    """Pooled Bluff/Anchor rate per Condition (homogeneous cells, Bots excluded), plus SP minus SP-blind."""
+    rows = [m for m in metrics if not m["entrant"].startswith("bot:")]
+    rows = [m for m in rows if m["table"] == "homogeneous"] or rows
+    pooled = {}
+    for measure, col in (("bluff", "bluffs"), ("anchor", "anchors")):
+        tot = defaultdict(lambda: [0, 0])
+        for m in rows:
+            tot[m["entrant"]][0] += m[col]
+            tot[m["entrant"]][1] += m["suggestions"]
+        pooled[measure] = {e: (k, n) for e, (k, n) in tot.items()}
+    out = []
+    for measure, by in pooled.items():
+        for e, (k, n) in by.items():
+            lo, hi = wilson_ci(k, n) if n else (0.0, 0.0)
+            out.append({"measure": measure, "entrant": e, "suggestions": n, "count": k,
+                        "rate": k / n if n else 0.0, "ci_lo": lo, "ci_hi": hi})
+        if "ppo-sp" in by and "ppo-sp-blind" in by:
+            (ka, na), (kb, nb) = by["ppo-sp"], by["ppo-sp-blind"]
+            if na and nb:
+                pa, pb = ka / na, kb / nb
+                se = (pa * (1 - pa) / na + pb * (1 - pb) / nb) ** 0.5
+                out.append({"measure": measure, "entrant": "ppo-sp minus ppo-sp-blind",
+                            "suggestions": na + nb, "count": ka + kb, "rate": pa - pb,
+                            "ci_lo": pa - pb - 1.96 * se, "ci_hi": pa - pb + 1.96 * se})
+    return out
+
+
 def run_grid(conditions: dict, cfg: EvalConfig = EvalConfig(), workers: int = 1) -> Tables:
     """Play the whole grid. `conditions` maps Condition name -> Entrant. Deterministic for any `workers`."""
     tasks = _tasks(conditions, cfg)
-    if workers <= 1:
-        results = [_run_task(t) for t in tasks]
-    else:
-        with ProcessPoolExecutor(workers) as ex:
-            results = list(ex.map(_run_task, tasks))
+    results = arena.map_chunks(_run_task, tasks, workers)
     games, parts = [], {}
     for task, (rows, metrics) in zip(tasks, results):
         games += rows
@@ -223,14 +276,16 @@ def run_grid(conditions: dict, cfg: EvalConfig = EvalConfig(), workers: int = 1)
             key = (task[0], task[1], task[2], task[3], e)
             pm, pc = parts.get(key, (Metrics(), 0))
             parts[key] = (pm + m, pc + c)
-    return Tables(games, _cells(games), _comparisons(games), _metric_rows(parts))
+    metrics = _metric_rows(parts, games, cfg.metric_games)
+    return Tables(games, _cells(games), _comparisons(games), metrics, _bluff_anchor(metrics))
 
 
 def write_tables(t: Tables, out_dir) -> None:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     for name, cols in (("games", GAMES_COLUMNS), ("cells", CELLS_COLUMNS),
-                       ("comparisons", COMPARISON_COLUMNS), ("metrics", METRICS_COLUMNS)):
+                       ("comparisons", COMPARISON_COLUMNS), ("metrics", METRICS_COLUMNS),
+                       ("bluff_anchor", BLUFF_ANCHOR_COLUMNS)):
         with open(out / f"{name}.csv", "w", newline="") as fh:
             w = csv.DictWriter(fh, cols)
             w.writeheader()

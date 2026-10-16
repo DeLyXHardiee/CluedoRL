@@ -135,3 +135,55 @@ def test_metrics_carry_accusation_candidate_distribution():
     for m in t.metrics:
         vals = [int(v) for v in m["accusation_candidates"].split()] if m["accusation_candidates"] else []
         assert len(vals) == m["accusations"] and all(v >= 1 for v in vals)
+
+
+def test_truncated_games_are_counted_in_games_cells_and_metrics(monkeypatch):
+    from cluedo.core import arena
+    from cluedo.core.rules import Game
+
+    class Short(Game):
+        @classmethod
+        def new(cls, n_players, seed, max_turns=3):
+            return super().new(n_players, seed, max_turns)
+
+    monkeypatch.setattr(arena, "Game", Short)
+    t = run_grid(TWINS, _cfg(games=12, metric_games=12))
+    assert set(r["truncated"] for r in t.games) <= {0, 1} and any(r["truncated"] for r in t.games)
+    for c in t.cells:
+        rows = [r for r in t.games if r["entrant"] == c["entrant"]]
+        assert c["truncated"] == sum(r["truncated"] for r in rows) > 0
+        assert c["truncation_rate"] == c["truncated"] / c["games"]
+    for m in t.metrics:
+        assert m["truncation_rate"] > 0
+
+
+def test_full_length_games_report_zero_truncation():
+    t = run_grid(TWINS, _cfg(games=6, metric_games=6))
+    assert all(r["truncated"] == 0 for r in t.games)
+    assert all(c["truncation_rate"] == 0 for c in t.cells)
+
+
+def test_bluff_anchor_table_has_rates_per_condition_and_the_sp_minus_blind_difference(tmp_path):
+    cfg = TrainConfig(hidden=16, depth=1)
+    torch.manual_seed(0)
+    ents = {}
+    for name in ("ppo-sp", "ppo-sp-blind"):
+        save_checkpoint(tmp_path / f"{name}.pt", make_actor(16, 1), make_critic(16, 1), cfg,
+                        condition=name, learner_steps=0, blind=name.endswith("blind"))
+        ents[name] = checkpoint_entrant(name, tmp_path / f"{name}.pt")
+    t = run_grid(ents, _cfg(games=8, metric_games=8))
+    rows = {(r["measure"], r["entrant"]): r for r in t.bluff_anchor}
+    for k in ("bluff", "anchor"):
+        for c in ents:
+            r = rows[(k, c)]
+            assert 0 <= r["ci_lo"] <= r["rate"] <= r["ci_hi"] <= 1
+        d = rows[(k, "ppo-sp minus ppo-sp-blind")]
+        assert d["rate"] == rows[(k, "ppo-sp")]["rate"] - rows[(k, "ppo-sp-blind")]["rate"]
+        assert d["ci_lo"] <= d["rate"] <= d["ci_hi"]
+    write_tables(t, tmp_path / "o")
+    assert len(list(csv.DictReader(open(tmp_path / "o" / "bluff_anchor.csv")))) == len(t.bluff_anchor) == 6
+
+
+def test_no_difference_row_without_both_self_play_conditions():
+    t = run_grid(TWINS, _cfg(games=6, metric_games=6))
+    assert all("minus" not in r["entrant"] for r in t.bluff_anchor)

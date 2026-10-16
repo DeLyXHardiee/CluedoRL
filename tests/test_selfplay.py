@@ -78,7 +78,7 @@ def test_opponents_are_stochastic_and_blind_flag_reaches_their_policies(tmp_path
     assert load_checkpoint(pool.dir / "latest.pt").blind is True
     env = _env("ppo-sp-blind", pool, blind=True, seed=2)
     env.reset()
-    assert all(not p.greedy and p.enc.blind for p in env._players.values())
+    assert all(not p.greedy and p.blind for p in env.opponent_players.values())
 
 
 def test_env_workers_run_single_threaded_torch():

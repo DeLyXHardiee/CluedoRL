@@ -8,6 +8,10 @@ Output is one vector PDF per figure, sized for the paper (single column 3.4 in, 
 
 General rules for every figure: error bars are 95% intervals; seeds are separate rows and never pooled in the win-rate figures (one marker per seed, a Condition's markers should agree); the behaviour figures pool the first `--metric-games` games of every cell and seed, so they are only as large as that sample (check the `n=` labels). Overlapping intervals mean "not distinguished at this sample size", not "equal". The grid has many cells, so a single separated pair among dozens is weak evidence; prefer the Holm-adjusted `p_holm` in `comparisons.csv` for any claim.
 
+Truncation: a game that reaches the Turn cap has no winner and counts as a loss for everyone. `cells.csv` and `games.csv` carry `truncated` (and `truncation_rate` per cell), `metrics.csv` the `truncation_rate` of the measured games. The win-rate panels print an orange warning sign with the share of truncated games whenever it is nonzero. Any nonzero rate means the win rates in that panel understate every Entrant (a stalling policy shows up here, not as a draw); report it, and do not rank Conditions whose truncation rates differ much.
+
+Holm correction: `p_holm` in `comparisons.csv` is adjusted over one family = all comparisons within one seed (every table, field, player count and pair of Entrants of that seed); seeds are separate families. The test is McNemar's exact test on the discordant games, those where exactly one of the two Entrants won; in a mixed table the same game is read for both Entrants. `bluff_anchor.csv` holds the numbers behind the `bluff_anchor` figure (rates per Condition and the PPO-SP minus PPO-SP-blind difference with its CI).
+
 ## `winrate` (double column)
 
 Win rate with Wilson 95% CI. One panel per player count, x = Opponent (the Bot the Learner faces; the last five are held-out), one marker group per Condition, dotted line = chance (1/n).
