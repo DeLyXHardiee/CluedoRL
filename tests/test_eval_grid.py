@@ -128,3 +128,10 @@ def test_cli_writes_tables_for_checkpoints(tmp_path):
     assert {r["seed"] for r in cells} == {"0", "1"}
     assert {r["field"] for r in cells} == {"cand/certain", "mixed"}
     assert {r["entrant"] for r in cells if r["field"] == "mixed"} == {"fb", "sp", "blind", "bot:cand/smart/certain"}
+
+
+def test_metrics_carry_accusation_candidate_distribution():
+    t = run_grid(TWINS, _cfg(games=12, metric_games=12))
+    for m in t.metrics:
+        vals = [int(v) for v in m["accusation_candidates"].split()] if m["accusation_candidates"] else []
+        assert len(vals) == m["accusations"] and all(v >= 1 for v in vals)

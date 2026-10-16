@@ -13,3 +13,4 @@ __pycache__/
 # Claude Code local state
 .claude/
 runs/
+figures/out/
