@@ -43,7 +43,8 @@ COMPARISON_COLUMNS = ["table", "field", "n_players", "seed", "a", "b", "games", 
 _METRIC_COUNTS = [f.name for f in fields(Metrics) if f.name not in ("accusation_candidates", "info_gains")]
 METRICS_COLUMNS = (["table", "field", "n_players", "seed", "entrant", "games_measured"] + _METRIC_COUNTS +
                    ["bluff_rate", "anchor_rate", "probe_rate", "accusation_accuracy",
-                    "mean_accusation_candidates", "mean_info_gain", "reshow_rate", "leakage"])
+                    "mean_accusation_candidates", "mean_info_gain", "reshow_rate", "leakage",
+                    "accusation_candidates"])  # last: space-separated Candidates left at each Accusation
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,7 @@ def _metric_rows(parts):
         row = {"table": t, "field": f, "n_players": n, "seed": seed, "entrant": e, "games_measured": c}
         row.update({k: getattr(m, k) for k in _METRIC_COUNTS})
         row.update(m.summary())
+        row["accusation_candidates"] = " ".join(str(c) for c in m.accusation_candidates)
         out.append(row)
     return out
 
