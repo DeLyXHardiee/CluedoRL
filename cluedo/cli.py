@@ -10,7 +10,7 @@ import random
 
 from .core import ACCUSE, SUGGEST, Game, random_legal
 from .core.bots import parse_bot
-from .core.cards import CARD_NAMES, CATS
+from .core.cards import CARD_NAMES, CATS, ROOMS, SUSPECTS, WEAPONS
 from .core.deduction import Deduction
 
 
@@ -62,9 +62,8 @@ def ask(game, inp, out):
     while True:
         try:
             if d.phase == SUGGEST:
-                out("Suspects: " + ", ".join(f"{i}={n}" for i, n in enumerate(CARD_NAMES[0:6])))
-                out("Weapons: " + ", ".join(f"{i}={n}" for i, n in enumerate(CARD_NAMES[6:12])))
-                out("Rooms: " + ", ".join(f"{i}={n}" for i, n in enumerate(CARD_NAMES[12:21])))
+                for label, names in (("Suspects", SUSPECTS), ("Weapons", WEAPONS), ("Rooms", ROOMS)):
+                    out(f"{label}: " + ", ".join(f"{i}={n}" for i, n in enumerate(names)))
                 a = (SUGGEST, *parse_cards(inp("suggest (suspect weapon room)> ")))
             elif d.phase == ACCUSE:
                 raw = inp("accuse? Enter to pass, or 'suspect weapon room'> ").strip()
@@ -93,13 +92,22 @@ class UniformPlayer:
 
 def seat_opponents(game, human_seat, specs, rng):
     """{seat: player} for every Seat but the human's. `specs` (Bot specs such as
-    'cand/smart/gamble2', or 'uniform') are dealt to the other Seats in order, cycling."""
+    'cand/smart/gamble2', 'uniform', or 'ckpt:PATH' for a trained Checkpoint) are dealt to the other
+    Seats in order, cycling. torch is imported only when a 'ckpt:' spec is used (core stays torch-free)."""
     others = [s for s in range(game.n) if s != human_seat]
-    out = {}
+    out, ckpts = {}, {}
     for i, seat in enumerate(others):
         spec = specs[i % len(specs)]
-        out[seat] = (UniformPlayer(rng) if spec == "uniform"
-                     else parse_bot(spec).player(game, seat, rng))
+        if spec == "uniform":
+            out[seat] = UniformPlayer(rng)
+        elif spec.startswith("ckpt:"):
+            path = spec[len("ckpt:"):]
+            if path not in ckpts:
+                from cluedo.rl.checkpoint import load_checkpoint  # lazy: needs torch
+                ckpts[path] = load_checkpoint(path)
+            out[seat] = ckpts[path].player(game, seat, rng)
+        else:
+            out[seat] = parse_bot(spec).player(game, seat, rng)
     return out
 
 
@@ -136,7 +144,8 @@ def main(argv=None):
     p.add_argument("--seat", type=int, default=0)
     p.add_argument("--opponents", default="cand/smart/certain",
                    help="comma-separated Bot specs suggest/reveal/accuse (e.g. "
-                        "focused/smart/gamble2) dealt to the other Seats in order, or 'uniform'")
+                        "focused/smart/gamble2) dealt to the other Seats in order, or 'uniform', or "
+                        "'ckpt:PATH' to seat a trained Checkpoint")
     p.add_argument("--log", help="write the Game log JSON here")
     args = p.parse_args(argv)
     seed = args.seed if args.seed is not None else random.randrange(2**31)

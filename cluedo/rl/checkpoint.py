@@ -11,9 +11,9 @@ from dataclasses import asdict, dataclass
 import torch
 from tensordict import TensorDict
 
+from cluedo import contract as C
 from cluedo.rl.config import TrainConfig
 from cluedo.rl.encoding import SeatEncoder
-from cluedo.rl.env import CluedoEnv
 from cluedo.rl.ppo_stack import make_actor, make_critic
 
 
@@ -64,6 +64,10 @@ class PolicyPlayer:
         self.net = next(m for m in actor.modules() if isinstance(m, MLP))  # bypass TensorDict overhead
         self.enc = SeatEncoder(game, seat, blind=blind)
 
+    @property
+    def blind(self) -> bool:
+        return self.enc.blind
+
     @torch.no_grad()
     def act(self, game):
         logits = self.net(torch.from_numpy(self.enc.observation()))
@@ -71,5 +75,5 @@ class PolicyPlayer:
         p = torch.softmax(logits, -1)
         a = int(logits.argmax()) if self.greedy else int(torch.multinomial(p, 1))
         top = p.topk(min(self.TOP_K, p.numel()))  # for Game logs: top few legal actions and their probability
-        self.last_probs = [(CluedoEnv._to_core(int(i)), float(v)) for v, i in zip(top.values, top.indices) if v > 0]
-        return CluedoEnv._to_core(a)
+        self.last_probs = [(C.to_core_action(int(i)), float(v)) for v, i in zip(top.values, top.indices) if v > 0]
+        return C.to_core_action(a)

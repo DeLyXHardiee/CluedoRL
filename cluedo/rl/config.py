@@ -21,7 +21,11 @@ class TrainConfig:
     # network (actor and critic share the shape)
     hidden: int = 256
     depth: int = 2
-    pass_bias: float = 9.0  # initial pass-logit prior (cautious early game)
+    # Initial pass-logit prior. Why: a uniform initial policy faces 324 Accusations + pass at the first Accuse
+    # phase, accuses on turn 1 and is eliminated, so win rate stuck at 1-2% (results/09). This only sets the
+    # initialisation (P(pass) ~ 0.95 at game start); it is applied identically to every Condition and is not
+    # reward shaping: the reward is still +1 for winning, and the policy is free to move away from it.
+    pass_bias: float = 9.0
     # PPO (gamma = 1 + GAE: only the real race creates urgency, spec story 38)
     gamma: float = 1.0
     lmbda: float = 0.95

@@ -28,3 +28,7 @@ so more budget is needed for gate 1.
 Finding that shaped the config: with a uniform initial policy, the first Accuse phase of a game offers 324
 Accusations plus pass, so the Learner accused and died on turn one and win rate stayed at 1-2% for 1.2M steps
 (lr 3e-4 and 1e-3 alike). An initial pass-logit prior (`pass_bias=9.0`, P(pass) about 0.95 at game start) fixed this.
+Rationale and scope of `pass_bias`: it counters the uniform-initialisation accident (a uniform policy accuses on
+turn 1) and nothing else. It is an initialisation of the output bias, applied identically to every Condition
+(PPO-FB, PPO-SP, PPO-SP-blind), so it cannot favour one Condition; it is not reward shaping (no reward term
+changes, the Learner can learn to accuse earlier or later).

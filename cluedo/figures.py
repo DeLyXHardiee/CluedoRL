@@ -105,6 +105,19 @@ def _save(fig, out, name):
 
 # ------------------------------------------------------------------ figures
 
+def _truncation(rows):
+    """Share of games that hit the Turn cap over `rows` (cells.csv rows); 0 when the column is absent."""
+    games = sum(float(r["games"]) for r in rows)
+    return sum(float(r.get("truncated") or 0) for r in rows) / games if games else 0.0
+
+
+def _warn_truncation(ax, rows):
+    rate = _truncation(rows)
+    if rate > 0:
+        ax.text(0.99, 0.98, f"\u26a0 {100 * rate:.1f}% truncated", transform=ax.transAxes, ha="right",
+                va="top", fontsize=5.5, color="#D55E00")
+
+
 def fig_winrate(results, out):
     cells = [r for r in _read(results, "cells") if r["table"] == "homogeneous"]
     ns = sorted({int(r["n_players"]) for r in cells})
@@ -136,6 +149,7 @@ def fig_winrate(results, out):
         ax.set_xticks(range(len(fields_)))
         ax.set_xticklabels(fields_, rotation=45, ha="right")
         ax.set_title(f"{n} players")
+        _warn_truncation(ax, sub)
         ax.set_ylim(0, min(1.0, 1.15 * max([float(r["ci_hi"]) for r in cells] + [1 / min(ns)])))
     axes[0].set_ylabel("win rate (Wilson 95% CI)")
     h, l = axes[0].get_legend_handles_labels()
@@ -163,6 +177,7 @@ def fig_winrate_mixed(results, out):
                     ax.errorbar(i + 0.2 * (si - (len(seeds) - 1) / 2), y, yerr=_err(y, lo, hi),
                                 fmt=marker, color=colour, ms=3, lw=0.6)
     ax.axhline(float(cells[0]["chance"]), color="k", ls=":", lw=0.7)
+    _warn_truncation(ax, cells)
     ax.set_xticks(range(len(ents)))
     ax.set_xticklabels(ents, rotation=30, ha="right")
     ax.set_ylabel("win rate (Wilson 95% CI)")

@@ -6,6 +6,7 @@ import sys
 import pytest
 
 from cluedo.core import Game, IllegalAction, random_legal
+from cluedo.core.cards import CATS
 
 ENV = (0, 6, 12)
 H0 = [1, 2, 3, 4, 5, 7]
@@ -204,19 +205,22 @@ def test_core_never_imports_torch():
     subprocess.run([sys.executable, "-c", code], check=True)
 
 
-def test_cli_human_plays_to_the_end():
-    from cluedo.cli import play
-    game = Game.new(3, 5)
-    seat = 0
-    script = []
-
+def _human_script(game):
+    """CLI input for a human who suggests (0, 0, 0), accuses the true Envelope, reveals the lowest card."""
     def inp(prompt):
         if prompt.startswith("suggest"):
             return "0 0 0"
         if prompt.startswith("accuse"):
-            return "{} {} {}".format(*[c - o for c, o in zip(game.envelope, (0, 6, 12))])
-        return str(sorted(game._reveal_options)[0])
+            return " ".join(str(c - cat[0]) for c, cat in zip(game.envelope, CATS))
+        return str(min(c for (_, c) in game.legal_actions()))
+    return inp
 
+
+def test_cli_human_plays_to_the_end():
+    from cluedo.cli import play
+    game = Game.new(3, 5)
+    seat = 0
+    inp = _human_script(game)
     lines = []
     play(game, seat, random.Random(0), inp=inp, out=lines.append)
     assert game.done
@@ -228,13 +232,7 @@ def test_cli_seats_bots_as_opponents():
     from cluedo.cli import play, seat_opponents
     game = Game.new(4, 9)
     lines = []
-
-    def inp(prompt):
-        if prompt.startswith("suggest"):
-            return "0 0 0"
-        if prompt.startswith("accuse"):
-            return "{} {} {}".format(*[c - o for c, o in zip(game.envelope, (0, 6, 12))])
-        return str(sorted(game._reveal_options)[0])
+    inp = _human_script(game)
 
     opponents = seat_opponents(game, 0, ["cand/smart/gamble2", "focused/smart/certain"],
                                random.Random(0))
