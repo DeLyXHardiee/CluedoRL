@@ -50,7 +50,7 @@ How the three files connect in one env step:
  (283 floats, 649 bools)                              (YES / NO / UNKNOWN per seat)
 ```
 
-On Opponent turns, `ClueEnv` gets the action from the bot's `act(phase)` instead of the policy, and the same loop through `Game.step` runs.
+On Opponent turns, the engine's `play` gets the action from the bot's `act(phase)` instead of the policy, and the same path through `Game.step` runs.
 
 ## Game engine (`engine.py`)
 
@@ -81,6 +81,7 @@ An action is a kind plus one card per category, `(kind, suspect, weapon, room)`,
 | `Game(n, seed)` | Shuffles, picks the envelope, lays out the face-up cards, deals |
 | `start(actors)` | Stores the actor list and calls `actor.reset(seat, n, hand, face_up)` for each seat |
 | `step(action)` | Plays the current seat's action, broadcasts the event, ends the turn unless the action was a suggestion, returns the full event |
+| `play(stop_at=None)` | Runs the game loop: asks the current seat's actor for its action and plays it, until the game is over or it is `stop_at`'s turn |
 
 ### What `step` does
 
@@ -89,6 +90,19 @@ An action is a kind plus one card per category, `(kind, suspect, weapon, room)`,
 3. END: nothing to resolve. Accusation: correct sets `winner` and `done`. Wrong marks the seat eliminated; if every seat is now eliminated, set `done`.
 4. Unless the action was END, build the event and broadcast it (below).
 5. After a suggestion, set phase to AFTER_SUGGEST and return: the same seat acts again. Otherwise set phase to MAIN and add 1 to `turn`; at 200 set `done` and `truncated`. Otherwise move `current` to the next non-eliminated seat.
+
+### What `play` does
+
+`play` is the only game loop in the project; bot matches and the RL env both use it.
+
+1. While the game is not over and `current` is not `stop_at`: call `actors[current].act(phase)` and pass the result to `step`.
+2. Return. Everything needed to continue is stored in the game, so calling `play` again carries on where it stopped.
+
+- **Bot match:** `play()` runs the whole game.
+- **RL env:** `play(stop_at=learner_seat)` runs every Opponent turn and returns when the Learner must decide. It also returns after the Learner's own suggestion without running anything, because it is still the Learner's turn.
+- **Why it stops instead of calling the Learner's `act`:** the Learner's action comes from the policy, which TorchRL runs outside the env between two `env.step` calls. Each Learner decision must be one env step, or the collector cannot record it for training.
+
+Everything runs in order on one call stack: no threads, no waiting.
 
 ### Events and broadcasting
 
@@ -109,14 +123,14 @@ The redaction of `shown` is the one place where a bug lets the agent cheat silen
 
 ## Actor interface (`actors.py`)
 
-Every seat is an `Actor` with four methods, and each actor keeps its own `Knowledge` notepad. The engine calls `choose_reveal` and `observe`. The game loop (a bot match or the RL env) calls `act`. The Learner is an actor too: the env never calls its `act`, because the policy picks its action.
+Every seat is an `Actor` with four methods, and each actor keeps its own `Knowledge` notepad. The engine calls all of them: `choose_reveal` and `observe` from `step`, and `act` from `play`. The Learner is an actor too, but `play` stops at its turn instead of calling its `act`, because the policy picks its action.
 
 ### The four methods
 
 | Method | Called by | When | Returns |
 | --- | --- | --- | --- |
 | `reset(seat, n, hand, face_up)` | engine `start` | Once per game | Nothing; builds a fresh `Knowledge` |
-| `act(phase)` | game loop | On this seat's turn, and again after its own suggestion | An action tuple |
+| `act(phase)` | engine `play` | On this seat's turn, and again after its own suggestion | An action tuple |
 | `choose_reveal(matching, suggester)` | engine | This seat must show a card | One card from `matching` |
 | `observe(event)` | engine | After every action, redacted | Nothing; updates `Knowledge` |
 
@@ -232,14 +246,14 @@ The action is an index, not a one-hot, because `MaskedCategorical` samples indic
 
 1. New `Game(4, seed)` from the env's own `random.Random`.
 2. Pick a random Learner seat; fill the other seats with bots drawn from the opponent list.
-3. Call `game.start(actors)`, then play Opponent turns until it is the Learner's turn.
-4. If the game ends before the Learner moves (rare), deal again.
+3. Call `game.start(actors)`, then `game.play(stop_at=learner_seat)`. When it returns, it is the Learner's turn.
+4. If the game ended before the Learner moved (rare), go back to step 1 and deal again.
 5. Return a `TensorDict` with `observation`, `action_mask` and `done`, `terminated`, `truncated` all False.
 
 ### `_step(tensordict)`
 
 1. Read `tensordict["action"]`, decode it, and call `game.step`.
-2. If the Learner just suggested, skip this: its next decision is accuse or END. Otherwise play Opponent turns until it is the Learner's turn again, or the game is over, or the Learner is eliminated.
+2. If the Learner is now eliminated, end the episode (see the table). Otherwise call `game.play(stop_at=learner_seat)`. It runs Opponent turns until the Learner must decide again or the game is over. After the Learner's own suggestion it returns at once, since the Learner still has to accuse or play END.
 3. Return `observation`, `action_mask`, `reward`, `done`, `terminated`, `truncated`. Return them flat: `EnvBase.step` moves them under `"next"` for you.
 
 | Outcome | reward | terminated | truncated | done |
@@ -305,7 +319,7 @@ Agree on these on day one and do not change them without telling the other perso
 
 | Name | From | Used by B for |
 | --- | --- | --- |
-| `Game(n, seed)`, `start`, `step`, `current`, `done`, `truncated`, `winner`, `eliminated` | `engine.py` | Running the game inside the env |
+| `Game(n, seed)`, `start`, `step`, `play`, `current`, `done`, `truncated`, `winner`, `eliminated` | `engine.py` | Running the game inside the env |
 | `Actor` and its four methods | `actors.py` | The Learner actor and the opponent list |
 | `Knowledge`: the YES/NO/UNKNOWN table, envelope candidates, accusation candidates | `actors.py` | Observation and action mask |
 | `RandomBot`, `CandidateBot`, `GambleBot(k)` | `actors.py` | Opponents and evaluation |
