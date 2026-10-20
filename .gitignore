@@ -7,3 +7,35 @@ simulator_gap_analysis.md
 
 # Python
 __pycache__/
+# Node modules
+node_modules/
+
+# Environment variables
+.env
+
+# Logs
+*.log
+
+# IDE files
+.vscode/
+.idea/
+
+# Mac OS files
+.DS_Store
+
+# Debug files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build files
+dist/
+build/
+
+# RL-Reason-Game specific outputs
+rl-reason-game/models/
+rl-reason-game/wandb/
+
+# Python caches
+__pycache__/
+.pytest_cache/
