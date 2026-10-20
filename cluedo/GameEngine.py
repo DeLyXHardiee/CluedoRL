@@ -2,6 +2,10 @@
 import random
 import enum
 
+#set recursion limit for deep game state observations
+import sys
+sys.setrecursionlimit(10000)
+
 # Enum for action types in the game
 class ActionTypes(enum.Enum):
     SUGGEST = 1
@@ -36,6 +40,7 @@ class CluedoGameEngine:
         print("Starting game with players:", [self.players.index(player) for player in self.players])
         # Initialize the game, deal cards, and set up the envelope
         self.current_turn = 0
+        self.turns_taken = 0
         self.eliminated_players = []
         self.winner = None
         self.turns = []
@@ -83,7 +88,8 @@ class CluedoGameEngine:
 
     def next_turn(self):
         self.current_turn = (self.current_turn + 1) % len(self.players)
-        if self.current_turn > 200:
+        self.turns_taken += 1
+        if self.turns_taken > 200:
             raise RuntimeError("Maximum number of turns exceeded.")
 
     # Currently accusing after suggesting doesnt work
@@ -102,8 +108,8 @@ class CluedoGameEngine:
         elif action[0] == ActionTypes.SUGGEST:
             suggestion = action[1:]
             revealed_card, revealed_by = self.suggestLoop(player, suggestion)
-            self.broadcastReveal(revealed_card, revealed_by, player)
             self.next_turn()
+            self.broadcastReveal(revealed_card, revealed_by, player)
             return
         elif action[0] == ActionTypes.ACCUSE:
             accusation = action[1:]
