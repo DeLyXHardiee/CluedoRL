@@ -18,6 +18,7 @@ These are deliberate simplifications. State them in the report as modelling choi
 | Deal | One envelope card per category, 18 % n left-over cards face up for everyone, the rest dealt round-robin from a shuffled deck | 4 players get hands of 4, 4, 4, 4; the other 2 lie face up |
 | Turn | Up to two actions per turn: a suggestion, then an accusation or END; or an accusation straight away | Matches real Cluedo; costs one END action and a phase flag |
 | Answering | Seats to the suggester's left are asked in order; the first holding a named card shows one card to the suggester only | Standard rule |
+| Reveal | Every seat, the Learner included, picks which matching card to show by a fixed rule | Keeps the policy to own-turn decisions; see "The Learner's reveals" |
 | Wrong accusation | Accuser is eliminated, takes no more turns, but still answers suggestions | Standard rule; skipping them breaks deduction |
 | Game end | Correct accusation wins. If every seat is eliminated, nobody wins. 200 turns in total = truncated | Cap stops endless games of passive bots |
 | Randomness | One `random.Random(seed)` per game, passed to everything | Same seed, same game: needed for tests and fair evaluation |
@@ -153,6 +154,14 @@ Two bots are enough to train against; a third gives you a held-out opponent for 
 | `GambleBot(k)` | Like `CandidateBot` | When there are k or fewer accusation candidates, at random among them | Held-out opponent; takes risks |
 
 After their own suggestion, bots run the same accuse rule and play END if it does not fire. All three use the default random reveal. "Show a card I already showed this suggester" is a 3-line extra if you want a smarter reveal.
+
+### The Learner's reveals
+
+The Learner does not learn which card to reveal. Its actor uses the same fixed `choose_reveal` rule as the bots, and the policy only decides on the Learner's own turns.
+
+- **Why:** a reveal happens during another seat's turn. Learning it would make the engine pause mid-turn and hand control to the env, add a reveal phase and mask, and credit a reveal for a win many turns later. That is roughly 40-60 more lines for a choice that only exists when the Learner holds 2 or 3 of the named cards.
+- **Keep it equal:** give the Learner the same reveal rule as the opponents it trains against, so reveals do not explain differences in win rate.
+- **Later extension:** if you want to study reveals, compare a random rule with the "already shown" rule for the Learner in evaluation. That needs no training change.
 
 ## Observation: what fits the budget
 
