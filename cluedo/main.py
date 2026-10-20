@@ -6,14 +6,16 @@ player1 = CluedoActor()
 player2 = CluedoActor()
 player3 = CluedoActor()
 player4 = CluedoActor()
-player5 = CluedoActor()
-player6 = CluedoActor()
+#player5 = CluedoActor()
+#player6 = CluedoActor()
 game.players.append(player1)
 game.players.append(player2)
 game.players.append(player3)
 game.players.append(player4)
-game.players.append(player5)
-game.players.append(player6)
+#game.players.append(player5)
+#game.players.append(player6)
 
-game.start_game()
+
+for i in range(100):
+    game.start_game()
 

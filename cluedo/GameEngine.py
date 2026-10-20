@@ -4,6 +4,7 @@ import enum
 
 #set recursion limit for deep game state observations
 import sys
+from datetime import datetime
 sys.setrecursionlimit(10000)
 
 # Enum for action types in the game
@@ -36,6 +37,7 @@ class CluedoGameEngine:
         if player not in self.players and len(self.players) < self.playerLimit:
             self.players.append(player)
 
+    #Step 1
     def start_game(self):
         print("Starting game with players:", [self.players.index(player) for player in self.players])
         # Initialize the game, deal cards, and set up the envelope
@@ -48,7 +50,8 @@ class CluedoGameEngine:
         self.rng = random.Random()
 
         self.setup_envelope_and_deal_cards()
-    
+
+    #Step 2
     def setup_envelope_and_deal_cards(self):
 
         # Roll the cards and set up the envelope
@@ -90,10 +93,12 @@ class CluedoGameEngine:
         self.current_turn = (self.current_turn + 1) % len(self.players)
         self.turns_taken += 1
         if self.turns_taken > 200:
+            self.printToFile(self.turns)
             raise RuntimeError("Maximum number of turns exceeded.")
 
     # Currently accusing after suggesting doesnt work
     def step(self, player, action):
+        self.turns.append((self.turns_taken, player.seat, action))
         if player != self.players[self.current_turn]:
             return
         if player in self.eliminated_players:
@@ -108,6 +113,8 @@ class CluedoGameEngine:
         elif action[0] == ActionTypes.SUGGEST:
             suggestion = action[1:]
             revealed_card, revealed_by = self.suggestLoop(player, suggestion)
+            print(f"Suggestion made by {player.seat}: {suggestion}, revealed card: {revealed_card}, revealed by: {revealed_by.seat if revealed_by else revealed_by}")
+            self.turns[-1] = (self.turns_taken, player.seat, action, (revealed_card, revealed_by.seat if revealed_by else revealed_by))
             self.next_turn()
             self.broadcastReveal(revealed_card, revealed_by, player)
             return
@@ -115,14 +122,11 @@ class CluedoGameEngine:
             accusation = action[1:]
             if self.accuse(accusation):
                 self.winner = player
-                self.broadcastGameState()
             else:
                 self.eliminated_players.append(player)
-                self.broadcastGameState()
-            self.next_turn()
+                self.next_turn()
+            self.broadcastGameState()
             return
-        self.next_turn()
-        return
 
     def suggestLoop(self, player, suggestion):
         for i in range(len(self.players)):
@@ -160,8 +164,19 @@ class CluedoGameEngine:
         return True
 
     def broadcastReveal(self, revealed_card, revealed_by, suggesting_player):
-        # Broadcast the reveal to all players
-        #self.notify_all()
+        for player in self.players:
+            if player == suggesting_player:
+                player.observeRevealed({
+                    "revealed_card": revealed_card,
+                    "revealed_by": revealed_by,
+                    "suggesting_player": suggesting_player
+                })
+            else:
+                player.observeRevealed({
+                    "revealed_card": None,
+                    "revealed_by": revealed_by,
+                    "suggesting_player": suggesting_player
+                })
         self.broadcastGameState()
 
     def broadcastGameState(self):
@@ -173,8 +188,21 @@ class CluedoGameEngine:
             "turns": self.turns
         }
         # Broadcast a message to all players
-        self.notify_all()
-
-    def notify_all(self):
+        for player in self.players:
+            player.updateGameState(self.publicGameState)
+        if self.winner is not None:
+            print(f"Game over! The winner is {self.winner.seat}.")
+            self.printToFile(self.turns)
+            return
         for player in self.players:
             player.observe(self.publicGameState)
+            if self.winner is not None:
+                break
+
+    def printToFile(self, turns):
+        with open("turns_log.txt", "a") as f:
+            f.write("New game: " + str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")) + "\n")
+            f.write("Solution: " + str(self.envelope) + "\n")
+            f.write("Format: turn_number, player_seat, action, (revealed_card, revealed_by)\n")
+            for turn in turns:
+                f.write(str(turn) + "\n")

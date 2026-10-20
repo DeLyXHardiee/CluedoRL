@@ -12,15 +12,35 @@ class CluedoActor:
         self.n = n
         self.hand = hand
         self.public_cards = public_cards
+        self.noteCard = []
+        self.game_state = None
+        self.last_action = None
+
+        for card in self.hand:
+            if card not in self.noteCard:
+                self.noteCard.append(card)
+        for card in self.public_cards:
+            if card not in self.noteCard:
+                self.noteCard.append(card)
+
+    def updateGameState(self, game_state):
+        self.game_state = game_state
+
+    def observeRevealed(self, revealed_info):
+        if revealed_info["revealed_card"] not in self.noteCard:
+            self.noteCard.append(revealed_info["revealed_card"])
     
     def observe(self, game_state):
-        print("Observing game state:", game_state)
+        #print("Observing game state:", game_state)
         self.game_state = game_state
         if game_state["current_turn"] == self.seat:
             self.act(game_state)
     
     def act(self, game_state):
-        self.gameEngine.step(self, self.strategy(game_state))
+        action = self.strategy(game_state)
+        print("Acting with action:", action)
+        self.last_action = action
+        self.gameEngine.step(self, action)
         return
 
     def choose_reveal(self, suggestion, suggesting_player):
@@ -29,4 +49,15 @@ class CluedoActor:
                 return card
 
     def strategy(self, game_state):
-        return [ActionTypes.SUGGEST,0,6,12]
+        person = 0
+        weapon = 6
+        room = 12
+        while person in self.noteCard and person < 6:
+            person += 1
+        while weapon in self.noteCard and weapon < 12:
+            weapon += 1
+        while room in self.noteCard and room < 21:
+            room += 1
+        if self.last_action == [ActionTypes.SUGGEST, person, weapon, room]:
+            return [ActionTypes.ACCUSE, person, weapon, room]
+        return [ActionTypes.SUGGEST, person, weapon, room]
