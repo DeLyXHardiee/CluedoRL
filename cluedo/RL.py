@@ -1,7 +1,7 @@
 import random
 import torch
 from torchrl.envs import EnvBase
-from torchrl.data import TensorDict
+from tensordict import TensorDict
 from cluedo.game import Game, Actor
 
 class ClueEnv(EnvBase):
@@ -9,6 +9,22 @@ class ClueEnv(EnvBase):
     def __init__(self, opponent_factories, seed, player_count):
         super().__init__()
         self.opponent_factories = opponent_factories
+        self.player_count = player_count
+        self.combination_count = 6 * 6 * 9 # suspects * weapons * rooms
+
+        # lookup table
+        actions = []
+        for kind in (SUGGEST, ACCUSE):
+            for suspect in range(0, 5):
+                for weapon in range(6, 11):
+                    for room in range(12, 21):
+                        actions.append(Action(kind, suspect, weapon, room))
+        actions.append(Action(END, None, None, None))
+        self.actions = actions
+
+        # dictionary of action to index
+        self.action_to_index = {action: index for index, action in enumerate(actions)}
+
         # self.observation_spec["observation"] = something
         # self.observation_spec["action_mask"] = something
         # self.action_spec = something
@@ -22,11 +38,11 @@ class ClueEnv(EnvBase):
         self.rng = random.Random(seed)
 
     def _reset(self, tensordict=None):
-        self.game = Game(player_count, self.rng.getrandbits(32))
-        self.seat = self.rng.randint(0, player_count - 1)
+        self.game = Game(self.player_count, self.rng.getrandbits(32))
+        self.seat = self.rng.randint(0, self.player_count - 1)
         self.actor = Actor(self.seat, self.rng)
         actors = []
-        for i in range(player_count):
+        for i in range(self.player_count):
             if i != self.seat:
                 random_index = self.rng.randint(0, len(self.opponent_factories) - 1)
                 opponent = self.opponent_factories[random_index](self.rng)
@@ -58,34 +74,47 @@ class ClueEnv(EnvBase):
         grid = grid.flatten().float()
         
         # Envelope candidates
-        candidates = knowledge.candidates
+        candidates = self.actor.get_candidates()
         cand = torch.zeros(21, dtype=torch.float32)
         for i in range(len(candidates)):
             cand[candidates[i]] = 1.0
         
         # How close learner is to solving
-        suspects = grid[:6]
-        weapons = grid[6:12]
-        rooms = grid[12:21]
+        suspects = cand[:6]
+        weapons = cand[6:12]
+        rooms = cand[12:21]
         solve = torch.zeros(4, dtype=torch.float32)
         solve[0] = suspects.sum() / 6.0 # how many candidates remain in suspects
         solve[1] = weapons.sum() / 6.0 # ... weapons
         solve[2] = rooms.sum() / 9.0 # ... rooms
-        solve[3] = len(candidates) / 324.0 # how many candidates remain in total
+        solve[3] = len(self.actor.get_accusation_candidates()) / self.combination_count # how many candidates remain in total
 
         # Game state
         state = torch.zeros(6, dtype=torch.float32)
-        eliminated = self.game.eliminated
+        eliminated = torch.tensor(self.game.eliminated, dtype=torch.float32)
         eliminated = torch.roll(eliminated, shifts=-self.seat, dims=0)
         for i in range(len(eliminated)):
             if eliminated[i]:
                 state[i] = 1.0
-        state[5] = 1.0 if self.game.phase == "AFTER_SUGGEST" else 0.0 # How do we get game phase?
-        state[6] = self.game.turn / self.game.max_turns
+        state[4] = 1.0 if self.game.phase == AFTER_SUGGEST else 0.0
+        state[5] = self.game.turn / self.game.max_turns
 
         encoded = torch.cat([grid, cand, solve, state], dim=0)
         return encoded
 
     def build_action_mask(self):
-        # Implement the logic to build the action mask based on the current game state
-        pass
+        action_mask = torch.zeros(len(self.actions), dtype=torch.bool)
+
+        if self.game.phase == MAIN:
+            action_mask[0:self.combination_count] = True
+
+        accusation_candidates = self.actor.get_accusation_candidates()
+        for candidate in accusation_candidates:
+            index = self.action_to_index[Action(ACCUSE, candidate[0], candidate[1], candidate[2])]
+            action_mask[index] = True
+
+        if self.game.phase == AFTER_SUGGEST:
+            action_mask[-1] = True 
+
+        assert action_mask.any(), "No valid actions available"
+        return action_mask
