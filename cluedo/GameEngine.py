@@ -13,6 +13,8 @@ class ActionTypes(enum.Enum):
     ACCUSE = 2
     END = 3
 
+SUGGEST, ACCUSE, END = ActionTypes.SUGGEST, ActionTypes.ACCUSE, ActionTypes.END
+
 class Phase(enum.Enum):
     MAIN = 1
     AFTER_SUGGEST = 2
@@ -24,7 +26,9 @@ cards = {0:"Miss Scarlet", 1:"Colonel Mustard", 2:"Mrs. White", 3:"Mr. Green", 4
          12:"Kitchen", 13:"Ballroom", 14:"Conservatory", 15:"Dining Room", 16:"Billiard Room", 17:"Library", 18:"Lounge", 19:"Hall", 20:"Study"}
 
 class CluedoGameEngine:
-    def __init__(self):
+    def __init__(self, n=4, seed=None):
+        self.n = n
+        self.seed = seed
         self.players = []
         self.envelope = None
         self.current_turn = 0
@@ -56,7 +60,7 @@ class CluedoGameEngine:
         self.phase = MAIN
         self.turns = []
         self.hands = {}
-        self.rng = random.Random()
+        self.rng = random.Random(self.seed)
 
         self.setup_envelope_and_deal_cards()
 
@@ -161,7 +165,7 @@ class CluedoGameEngine:
     def validateAction(self, action):
         if not isinstance(action[0], ActionTypes):
             raise ValueError("Invalid action type.")
-        if self.phase == MAIN and action[0] == ActionType.END:
+        if self.phase == MAIN and action[0] == ActionTypes.END:
             return False
         if self.phase == AFTER_SUGGEST and action[0] == ActionTypes.SUGGEST:
             return False

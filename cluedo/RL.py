@@ -3,7 +3,7 @@ import torch
 from torchrl.envs import EnvBase
 from torchrl.data import Composite, Unbounded, Binary, Categorical
 from tensordict import TensorDict
-from GameEngine import Game, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
+from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
 from Actor import Actor
 
 class ClueEnv(EnvBase):
@@ -47,7 +47,7 @@ class ClueEnv(EnvBase):
 
     def _reset(self, tensordict=None):
         while True:
-            self.game = Game(self.player_count, self.rng.getrandbits(32))
+            self.game = CluedoGameEngine(self.player_count, self.rng.getrandbits(32))
             self.seat = self.rng.randint(0, self.player_count - 1)
             self.actor = Actor(self.seat, self.rng)
             actors = []
