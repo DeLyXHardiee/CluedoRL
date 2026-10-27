@@ -18,8 +18,7 @@ game.players.append(player4)
 
 #time how long it takes to play this loop
 start_time = time.time()
-for i in range(100000):
+for i in range(1000000):
     game.start_game()
 end_time = time.time()
-print("Total time for 100000 games:", end_time - start_time)
-
+print("Total time for 1000000 games:", end_time - start_time)

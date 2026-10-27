@@ -203,7 +203,8 @@ class CluedoGameEngine:
             "current_turn": self.current_turn % len(self.players),
             "eliminated_players": self.eliminated_players,
             "winner": self.winner,
-            "turns": self.turns
+            "turns": self.turns,
+            "phase": self.phase
         }
         # Broadcast a message to all players
         for player in self.players:
