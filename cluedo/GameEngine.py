@@ -192,6 +192,7 @@ class CluedoGameEngine:
         for player in self.players:
             if player in self.revealed_info:
                 player.updateGameState({**self.publicGameState, "revealed_info": self.revealed_info[player]})
+        self.revealed_info = {}
         if self.winner is not None:
             #print(f"Game over! The winner is {self.winner.seat}.")
             self.printToFile(self.turns)
