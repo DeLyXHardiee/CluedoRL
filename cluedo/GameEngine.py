@@ -13,6 +13,12 @@ class ActionTypes(enum.Enum):
     ACCUSE = 2
     END = 3
 
+class Phase(enum.Enum):
+    MAIN = 1
+    AFTER_SUGGEST = 2
+
+MAIN, AFTER_SUGGEST = Phase.MAIN, Phase.AFTER_SUGGEST
+
 cards = {0:"Miss Scarlet", 1:"Colonel Mustard", 2:"Mrs. White", 3:"Mr. Green", 4:"Mrs. Peacock", 5:"Professor Plum",
          6:"Candlestick", 7:"Dagger", 8:"Lead Pipe", 9:"Revolver", 10:"Rope", 11:"Wrench",
          12:"Kitchen", 13:"Ballroom", 14:"Conservatory", 15:"Dining Room", 16:"Billiard Room", 17:"Library", 18:"Lounge", 19:"Hall", 20:"Study"}
@@ -26,6 +32,7 @@ class CluedoGameEngine:
         self.hands = {}
         self.eliminated_players = []
         self.winner = None
+        self.phase = MAIN
         self.rng = None
         self.turns = []
         self.publicCards = []
@@ -46,6 +53,7 @@ class CluedoGameEngine:
         self.turns_taken = 0
         self.eliminated_players = []
         self.winner = None
+        self.phase = MAIN
         self.turns = []
         self.hands = {}
         self.rng = random.Random()
@@ -91,6 +99,7 @@ class CluedoGameEngine:
         self.broadcastGameState()
 
     def next_turn(self):
+        self.phase = MAIN
         self.current_turn = (self.current_turn + 1) % len(self.players)
         self.turns_taken += 1
         if self.turns_taken > 200:
@@ -116,7 +125,7 @@ class CluedoGameEngine:
             revealed_card, revealed_by = self.suggestLoop(player, suggestion)
             #print(f"Suggestion made by {player.seat}: {suggestion}, revealed card: {revealed_card}, revealed by: {revealed_by.seat if revealed_by else revealed_by}")
             self.turns[-1] = (self.turns_taken, player.seat, action, (revealed_card, revealed_by.seat if revealed_by else revealed_by))
-            self.next_turn()
+            self.phase = AFTER_SUGGEST
             self.broadcastReveal(revealed_card, revealed_by, player)
             return
         elif action[0] == ActionTypes.ACCUSE:
@@ -152,6 +161,10 @@ class CluedoGameEngine:
     def validateAction(self, action):
         if not isinstance(action[0], ActionTypes):
             raise ValueError("Invalid action type.")
+        if self.phase == MAIN and action[0] == ActionType.END:
+            return False
+        if self.phase == AFTER_SUGGEST and action[0] == ActionTypes.SUGGEST:
+            return False
         if action[0] == ActionTypes.END:
             return True
         if len(action) != 4:
