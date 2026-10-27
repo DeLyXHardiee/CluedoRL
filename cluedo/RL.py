@@ -1,8 +1,10 @@
 import random
 import torch
 from torchrl.envs import EnvBase
+from torchrl.data import Composite, Unbounded, Binary, Categorical
 from tensordict import TensorDict
-from cluedo.game import Game, Actor
+from GameEngine import Game, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
+from Actor import Actor
 
 class ClueEnv(EnvBase):
 
@@ -18,20 +20,26 @@ class ClueEnv(EnvBase):
             for suspect in range(0, 6):
                 for weapon in range(6, 12):
                     for room in range(12, 21):
-                        actions.append(Action(kind, suspect, weapon, room))
-        actions.append(Action(END, None, None, None))
+                        actions.append((kind, suspect, weapon, room))
+        actions.append((END,))
         self.actions = actions
 
         # dictionary of action to index
         self.action_to_index = {action: index for index, action in enumerate(actions)}
 
-        # self.observation_spec["observation"] = something
-        # self.observation_spec["action_mask"] = something
-        # self.action_spec = something
-        # self.reward_spec = something
-        # done_spec["done"] = something
-        # done_spec["terminated"] = something
-        # done_spec["truncated"] = something
+        self.observation_spec = Composite(
+            observation=Unbounded(shape=(283,), dtype=torch.float32),
+            action_mask=Binary(shape=(649,), dtype=torch.bool),
+            shape=(),
+        )
+        self.action_spec = Categorical(n=649, shape=(), dtype=torch.int64)
+        self.reward_spec = Unbounded(shape=(1,), dtype=torch.float32)
+        self.done_spec = Composite(
+            done=Categorical(n=2, shape=(1,), dtype=torch.bool),
+            terminated=Categorical(n=2, shape=(1,), dtype=torch.bool),
+            truncated=Categorical(n=2, shape=(1,), dtype=torch.bool),
+            shape=(),
+        )
         self.set_seed(seed)
 
     def _set_seed(self, seed):
@@ -61,18 +69,38 @@ class ClueEnv(EnvBase):
         return TensorDict({
             "observation": self.observation,
             "action_mask": self.action_mask,
-            "done": torch.tensor(False, dtype=torch.bool),
-            "terminated": torch.tensor(False, dtype=torch.bool),
-            "truncated": torch.tensor(False, dtype=torch.bool)
+            "done": torch.tensor([False], dtype=torch.bool),
+            "terminated": torch.tensor([False], dtype=torch.bool),
+            "truncated": torch.tensor([False], dtype=torch.bool)
         }, batch_size=())
+        
 
     def _step(self, tensordict=None):
-        encoded_action = int(tensordict["action"])
-        decoded_action = decode_action(encoded_action)
-        reward, done = self.game.step(decoded_action)
-        next_state = self.game.get_state()
+        action = int(tensordict["action"])
+        self.game.step(action)
 
-        tensordict = TensorDict()
+        eliminated = self.game.eliminated[self.seat]
+        if not eliminated:
+            self.game.play(stop_at=self.seat)
+
+        won = self.game.winner == self.seat
+        truncated = self.game.truncated
+        terminated = eliminated or (self.game.done and not truncated)
+        done = terminated or truncated
+        reward = 1.0 if won else 0.0
+
+        candidates = self.actor.get_accusation_candidates()
+        observation = self.build_observation(candidates)
+        action_mask = self.build_action_mask(candidates)
+
+        tensordict = TensorDict({
+            "observation": observation,
+            "action_mask": action_mask,
+            "done": torch.tensor([done], dtype=torch.bool),
+            "terminated": torch.tensor([terminated], dtype=torch.bool),
+            "truncated": torch.tensor([truncated], dtype=torch.bool),
+            "reward": torch.tensor([reward], dtype=torch.float32)
+        }, batch_size=())
         return tensordict
 
     def build_observation(self, accusation_candidates):
@@ -118,7 +146,7 @@ class ClueEnv(EnvBase):
             action_mask[0:self.combination_count] = True
 
         for candidate in accusation_candidates:
-            index = self.action_to_index[Action(ACCUSE, candidate[0], candidate[1], candidate[2])]
+            index = self.action_to_index[(ACCUSE, candidate[0], candidate[1], candidate[2])]
             action_mask[index] = True
 
         if self.game.phase == AFTER_SUGGEST:
