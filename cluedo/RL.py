@@ -15,8 +15,8 @@ class ClueEnv(EnvBase):
         # lookup table
         actions = []
         for kind in (SUGGEST, ACCUSE):
-            for suspect in range(0, 5):
-                for weapon in range(6, 11):
+            for suspect in range(0, 6):
+                for weapon in range(6, 12):
                     for room in range(12, 21):
                         actions.append(Action(kind, suspect, weapon, room))
         actions.append(Action(END, None, None, None))
@@ -38,24 +38,33 @@ class ClueEnv(EnvBase):
         self.rng = random.Random(seed)
 
     def _reset(self, tensordict=None):
-        self.game = Game(self.player_count, self.rng.getrandbits(32))
-        self.seat = self.rng.randint(0, self.player_count - 1)
-        self.actor = Actor(self.seat, self.rng)
-        actors = []
-        for i in range(self.player_count):
-            if i != self.seat:
-                random_index = self.rng.randint(0, len(self.opponent_factories) - 1)
-                opponent = self.opponent_factories[random_index](self.rng)
-                actors.append(opponent)
-                continue
-            actors.append(self.actor)
+        while True:
+            self.game = Game(self.player_count, self.rng.getrandbits(32))
+            self.seat = self.rng.randint(0, self.player_count - 1)
+            self.actor = Actor(self.seat, self.rng)
+            actors = []
+            for i in range(self.player_count):
+                if i != self.seat:
+                    opponent = self.rng.choice(self.opponent_factories)(self.rng)
+                    actors.append(opponent)
+                    continue
+                actors.append(self.actor)
 
-        self.game.start_game(actors)
-        self.game.play(stop_at=self.seat)
+            self.game.start(actors)
+            self.game.play(stop_at=self.seat)
+            if not self.game.done:
+                break
 
+        self.observation = self.build_observation(self.actor.get_accusation_candidates())
+        self.action_mask = self.build_action_mask(self.actor.get_accusation_candidates())
 
-        tensordict = TensorDict()
-        return tensordict
+        return TensorDict({
+            "observation": self.observation,
+            "action_mask": self.action_mask,
+            "done": torch.tensor(False, dtype=torch.bool),
+            "terminated": torch.tensor(False, dtype=torch.bool),
+            "truncated": torch.tensor(False, dtype=torch.bool)
+        }, batch_size=())
 
     def _step(self, tensordict=None):
         encoded_action = int(tensordict["action"])
@@ -66,7 +75,7 @@ class ClueEnv(EnvBase):
         tensordict = TensorDict()
         return tensordict
 
-    def build_observation(self):
+    def build_observation(self, accusation_candidates):
         # Notepad grid
         knowledge = self.actor.get_knowledge()
         grid = torch.roll(knowledge, shifts=-self.seat, dims=0)
@@ -87,7 +96,7 @@ class ClueEnv(EnvBase):
         solve[0] = suspects.sum() / 6.0 # how many candidates remain in suspects
         solve[1] = weapons.sum() / 6.0 # ... weapons
         solve[2] = rooms.sum() / 9.0 # ... rooms
-        solve[3] = len(self.actor.get_accusation_candidates()) / self.combination_count # how many candidates remain in total
+        solve[3] = len(accusation_candidates) / self.combination_count # how many candidates remain in total
 
         # Game state
         state = torch.zeros(6, dtype=torch.float32)
@@ -102,13 +111,12 @@ class ClueEnv(EnvBase):
         encoded = torch.cat([grid, cand, solve, state], dim=0)
         return encoded
 
-    def build_action_mask(self):
+    def build_action_mask(self, accusation_candidates):
         action_mask = torch.zeros(len(self.actions), dtype=torch.bool)
 
         if self.game.phase == MAIN:
             action_mask[0:self.combination_count] = True
 
-        accusation_candidates = self.actor.get_accusation_candidates()
         for candidate in accusation_candidates:
             index = self.action_to_index[Action(ACCUSE, candidate[0], candidate[1], candidate[2])]
             action_mask[index] = True
