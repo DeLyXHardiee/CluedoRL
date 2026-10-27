@@ -30,6 +30,7 @@ class CluedoGameEngine:
         self.turns = []
         self.publicCards = []
         self.publicGameState = {}
+        self.revealed_info = {}
 
     def add_player(self, player):
         if self.current_turn != 0:
@@ -39,7 +40,7 @@ class CluedoGameEngine:
 
     #Step 1
     def start_game(self):
-        print("Starting game with players:", [self.players.index(player) for player in self.players])
+        #print("Starting game with players:", [self.players.index(player) for player in self.players])
         # Initialize the game, deal cards, and set up the envelope
         self.current_turn = 0
         self.turns_taken = 0
@@ -113,7 +114,7 @@ class CluedoGameEngine:
         elif action[0] == ActionTypes.SUGGEST:
             suggestion = action[1:]
             revealed_card, revealed_by = self.suggestLoop(player, suggestion)
-            print(f"Suggestion made by {player.seat}: {suggestion}, revealed card: {revealed_card}, revealed by: {revealed_by.seat if revealed_by else revealed_by}")
+            #print(f"Suggestion made by {player.seat}: {suggestion}, revealed card: {revealed_card}, revealed by: {revealed_by.seat if revealed_by else revealed_by}")
             self.turns[-1] = (self.turns_taken, player.seat, action, (revealed_card, revealed_by.seat if revealed_by else revealed_by))
             self.next_turn()
             self.broadcastReveal(revealed_card, revealed_by, player)
@@ -166,13 +167,13 @@ class CluedoGameEngine:
     def broadcastReveal(self, revealed_card, revealed_by, suggesting_player):
         for player in self.players:
             if player == suggesting_player:
-                player.observeRevealed({
+                self.revealed_info[player] = ({
                     "revealed_card": revealed_card,
                     "revealed_by": revealed_by,
                     "suggesting_player": suggesting_player
                 })
             else:
-                player.observeRevealed({
+                self.revealed_info[player] = ({
                     "revealed_card": None,
                     "revealed_by": revealed_by,
                     "suggesting_player": suggesting_player
@@ -189,9 +190,10 @@ class CluedoGameEngine:
         }
         # Broadcast a message to all players
         for player in self.players:
-            player.updateGameState(self.publicGameState)
+            if player in self.revealed_info:
+                player.updateGameState({**self.publicGameState, "revealed_info": self.revealed_info[player]})
         if self.winner is not None:
-            print(f"Game over! The winner is {self.winner.seat}.")
+            #print(f"Game over! The winner is {self.winner.seat}.")
             self.printToFile(self.turns)
             return
         for player in self.players:
