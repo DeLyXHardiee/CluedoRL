@@ -80,4 +80,6 @@ class CluedoActor(ICluedoActor):
             room += 1
         if self.last_action == [ActionTypes.SUGGEST, person, weapon, room]:
             return [ActionTypes.ACCUSE, person, weapon, room]
+        if game_state["phase"] == "AFTER_SUGGEST":
+            return [ActionTypes.END]
         return [ActionTypes.SUGGEST, person, weapon, room]
