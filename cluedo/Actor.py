@@ -28,11 +28,13 @@ class CluedoActor():
         self.last_action = action
         return action
 
+    # Basic reveal strategy: reveal the first matching card in hand
     def choose_reveal(self, suggestion, suggesting_player):
         for card in suggestion:
             if card in self.hand:
                 return card
 
+    # Default strategy, always suggest the first candidate cards and accuse only when certain
     def strategy(self, game_state):
         candidates = self.knowledge.candidates()
         suspects = [c for c in candidates if c < 6]
@@ -54,7 +56,7 @@ class CluedoActor():
     def get_accusation_candidates(self):
         return self.knowledge.accusation_candidates()
 
-
+# Knowledge representation for Cluedo game, tracking known and possible card ownerships
 class Knowledge:
     def __init__(self, seat, n, hand, face_up):
         self.seat = seat
@@ -109,6 +111,7 @@ class Knowledge:
             self.wrong_accusations.add(tuple(event["cards"]))
         self.propagate()
 
+    # Apply the "one-of" rule: if a player must have one of a set of cards, deduce ownership when possible
     def apply_one_of(self):
       changed = False
       remaining = []
@@ -128,16 +131,19 @@ class Knowledge:
         while self.apply_one_of() | self.apply_owner_and_full_hands(): 
             pass
 
+    # Determine the set of candidate cards for each category (suspects, weapons, rooms) based on current knowledge.
     def candidates(self):
         result = []
         for lo, hi in ((0, 6), (6, 12), (12, 21)):
             cards = [c for c in range(lo, hi)
                     if c not in self.face_up
                     and all(self.table[s][c] != YES for s in range(self.n))]
+            # Any card that is known to be held by no player is in the envelope and therefore no other cards from that category are candidates.
             known = [c for c in cards if all(self.table[s][c] == NO for s in range(self.n))]
             result += known[:1] or cards # weird syntax, but known has to be a list to append to result
         return result
 
+    # Generate all possible accusation combinations based on current knowledge and eliminated wrong accusations
     def accusation_candidates(self):
         c = self.candidates()
         return [(s, w, r)

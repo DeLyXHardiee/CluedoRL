@@ -5,7 +5,6 @@ import enum
 #set recursion limit for deep game state observations
 import sys
 from datetime import datetime
-sys.setrecursionlimit(10000)
 
 # Enum for action types in the game
 class ActionTypes(enum.Enum):
@@ -97,6 +96,7 @@ class CluedoGameEngine:
         if player_count == 0:
             raise ValueError("At least one player is required to deal cards.")
 
+        # Deal the remaining cards to the players evenly, leaving any remainder as public cards.
         remaining_cards = person_cards + weapon_cards + room_cards
         self.rng.shuffle(remaining_cards)
         remainder = len(remaining_cards) % player_count
@@ -119,17 +119,12 @@ class CluedoGameEngine:
             self.done = True
             self.truncated = True
 
-    # Currently accusing after suggesting doesnt work
+    # Execute a single game step based on the player's action.
     def step(self, action):
         player = self.players[self.current_turn]
         self.turns.append((self.turns_taken, player.seat, action))
-        if player in self.eliminated_players:
-            self.next_turn()
-            return
-        if not self.validateAction(action):
-            self.next_turn()
-            return
-        if action[0] == ActionTypes.END:
+        # Skip the turn if the player is eliminated, the action is invalid, or the action is to end the turn.
+        if player in self.eliminated_players or not self.validateAction(action) or action[0] == ActionTypes.END:
             self.next_turn()
             return
         elif action[0] == ActionTypes.SUGGEST:
@@ -169,6 +164,7 @@ class CluedoGameEngine:
             action = player.act({**self.publicGameState, "phase": self.phase})
             self.step(action)
 
+    # Determines which player should reveal and calls their own reveal strategy
     def suggestLoop(self, player, suggestion):
         passed = []
         for i in range(1, len(self.players)):
@@ -190,6 +186,8 @@ class CluedoGameEngine:
         }
         return all(self.envelope[key] == combination.get(key) for key in ["suspect", "weapon", "room"])
 
+    # Validate the player's action based on the current phase and action type.
+    # For suggests, ensure the suggested cards are within the valid ranges for suspects, weapons, and rooms.
     def validateAction(self, action):
         if not isinstance(action[0], ActionTypes):
             raise ValueError("Invalid action type.")
@@ -209,51 +207,12 @@ class CluedoGameEngine:
             raise ValueError("Invalid action value.")
         return True
 
-    def broadcastReveal(self, revealed_card, revealed_by, suggesting_player):
-        for player in self.players:
-            if player == suggesting_player:
-                self.revealed_info[player] = ({
-                    "revealed_card": revealed_card,
-                    "revealed_by": revealed_by,
-                    "suggesting_player": suggesting_player
-                })
-            else:
-                self.revealed_info[player] = ({
-                    "revealed_card": None,
-                    "revealed_by": revealed_by,
-                    "suggesting_player": suggesting_player
-                })
-        self.broadcastGameState()
-
     def broadcastEvent(self, event):
         for player in self.players:
             view = dict(event)
             if player.seat not in (event["seat"], event["answerer"]):
                 view["shown"] = None
             player.observe(view)
-
-    def broadcastGameState(self):
-        # Update the public game state
-        self.publicGameState = {
-            "current_turn": self.current_turn % len(self.players),
-            "eliminated_players": self.eliminated_players,
-            "winner": self.winner,
-            "turns": self.turns,
-            "phase": self.phase
-        }
-        # Broadcast a message to all players
-        for player in self.players:
-            if player in self.revealed_info:
-                player.updateGameState({**self.publicGameState, "revealed_info": self.revealed_info[player]})
-        self.revealed_info = {}
-        if self.winner is not None:
-            #print(f"Game over! The winner is {self.winner.seat}.")
-            self.printToFile(self.turns)
-            return
-        for player in self.players:
-            player.observe(self.publicGameState)
-            if self.winner is not None:
-                break
 
     def printToFile(self, turns):
         with open("turns_log.txt", "a") as f:
