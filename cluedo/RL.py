@@ -23,18 +23,10 @@ class ClueEnv(EnvBase):
         self.player_count = player_count
         self.combination_count = 6 * 6 * 9 # suspects * weapons * rooms
 
-        # lookup table
-        actions = []
-        for kind in (SUGGEST, ACCUSE):
-            for suspect in range(0, 6):
-                for weapon in range(6, 12):
-                    for room in range(12, 21):
-                        actions.append((kind, suspect, weapon, room))
-        actions.append((END,))
-        self.actions = actions
+        self.actions = build_actions()
 
         # dictionary of action to index
-        self.action_to_index = {action: index for index, action in enumerate(actions)}
+        self.action_to_index = {action: index for index, action in enumerate(self.actions)}
 
         self.observation_spec = Composite(
             observation=Unbounded(shape=(283,), dtype=torch.float32),
@@ -165,9 +157,62 @@ class ClueEnv(EnvBase):
         return action_mask
 
 
+class FactoredPolicy(torch.nn.Module):
+    
+    def __init__(self):
+        super().__init__()
+        self.body = MLP(in_features=283, out_features=45, num_cells=[256, 256])
+        self.actions = build_actions()
+        kind_idx = []
+        s_idx = []
+        w_idx = []
+        r_idx = []
+        
+        for action in self.actions:
+            kind = action[0]
+            if kind == END:
+                kind_idx.append(2)
+                s_idx.append(45)
+                w_idx.append(45)
+                r_idx.append(45) # the always zero position
+                continue
+
+            _, s, w, r = action
+
+            k = 0 if kind == SUGGEST else 1
+            kind_idx.append(k)
+            s_idx.append(3 + 21 * k + s)
+            w_idx.append(3 + 21 * k + w)
+            r_idx.append(3 + 21 * k + r)
+
+        kind_idx = torch.tensor(kind_idx, dtype=torch.long)
+        s_idx = torch.tensor(s_idx, dtype=torch.long)
+        w_idx = torch.tensor(w_idx, dtype=torch.long)
+        r_idx = torch.tensor(r_idx, dtype=torch.long)
+        self.register_buffer("kind_idx", kind_idx, persistent=False)
+        self.register_buffer("s_idx", s_idx, persistent=False)
+        self.register_buffer("w_idx", w_idx, persistent=False)
+        self.register_buffer("r_idx", r_idx, persistent=False)
+
+    def forward(self, observation):
+        output = self.body(observation)
+        zeros_column = torch.zeros_like(output[..., :1])
+        output = torch.cat((output, zeros_column), dim=-1)
+        return output[..., self.kind_idx] + output[..., self.s_idx] + output[..., self.w_idx] + output[..., self.r_idx] # one logit per slot in action table's order
+
+def build_actions():
+    # lookup table
+    actions = []
+    for kind in (SUGGEST, ACCUSE):
+        for suspect in range(0, 6):
+            for weapon in range(6, 12):
+                for room in range(12, 21):
+                    actions.append((kind, suspect, weapon, room))
+    actions.append((END,))
+    return actions
+
 def make_actor():
-      net = MLP(in_features=283, out_features=649, num_cells=[256, 256])
-      module = TensorDictModule(net, in_keys=["observation"], out_keys=["logits"])
+      module = TensorDictModule(FactoredPolicy(), in_keys=["observation"], out_keys=["logits"])
       return ProbabilisticActor(
           module,
           in_keys={"logits": "logits", "mask": "action_mask"},

@@ -9,10 +9,9 @@ class RandomActor(CluedoActor):
         suspects = [c for c in candidates if c < 6]
         weapons = [c for c in candidates if 6 <= c < 12]
         rooms = [c for c in candidates if c >= 12]
-        rng = random.Random(self.seed)
-        s = rng.randrange(len(suspects))
-        w = rng.randrange(len(weapons))
-        r = rng.randrange(len(rooms))
+        s = self.rng.randrange(len(suspects))
+        w = self.rng.randrange(len(weapons))
+        r = self.rng.randrange(len(rooms))
         guess = (suspects[s], weapons[w], rooms[r])
         if len(suspects) == len(weapons) == len(rooms) == 1:
             return (ActionTypes.ACCUSE, *guess)
@@ -28,15 +27,14 @@ class GambleActor(CluedoActor):
         suspects = [c for c in candidates if c < 6]
         weapons = [c for c in candidates if 6 <= c < 12]
         rooms = [c for c in candidates if c >= 12]
-        rng = random.Random(self.seed)
-        s = rng.randrange(len(suspects))
-        w = rng.randrange(len(weapons))
-        r = rng.randrange(len(rooms))
+        s = self.rng.randrange(len(suspects))
+        w = self.rng.randrange(len(weapons))
+        r = self.rng.randrange(len(rooms))
         guess = (suspects[s], weapons[w], rooms[r])
 
         accusation_candidates = self.knowledge.accusation_candidates()
         if len(accusation_candidates) <= 4:
-            rnd = rng.randrange(len(accusation_candidates))
+            rnd = self.rng.randrange(len(accusation_candidates))
             guess = accusation_candidates[rnd]
             return (ActionTypes.ACCUSE, *guess)
         if game_state["phase"] == AFTER_SUGGEST:
