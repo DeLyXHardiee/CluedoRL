@@ -109,7 +109,7 @@ class CluedoGameEngine:
                 self.hands[player] = []
             self.hands[player].append(card)
         for player in self.players:
-            player.reset(self, self.players.index(player), len(self.players), self.hands[player], self.publicCards)
+            player.reset(self, self.players.index(player), len(self.players), self.hands[player], self.publicCards, self.seed)
 
     def next_turn(self):
         self.phase = MAIN

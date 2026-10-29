@@ -3,31 +3,12 @@ from GameEngine import ActionTypes, AFTER_SUGGEST
 
 UNKNOWN, YES, NO = 0, 1, 2
 
-class ICluedoActor:
-    def reset(self, gameEngine, seat, n, hand, public_cards):
-        raise NotImplementedError
-
-    def updateGameState(self, game_state):
-        raise NotImplementedError
-
-    def observe(self, game_state):
-        raise NotImplementedError
-
-    def act(self, game_state):
-        raise NotImplementedError
-
-    def choose_reveal(self, suggestion, suggesting_player):
-        raise NotImplementedError
-
-    def strategy(self, game_state):
-        raise NotImplementedError
-
-class CluedoActor(ICluedoActor):
+class CluedoActor():
 
     def __init__(self):
         pass
 
-    def reset(self, gameEngine, seat, n, hand, public_cards):
+    def reset(self, gameEngine, seat, n, hand, public_cards, seed):
         self.gameEngine = gameEngine
         self.seat = seat
         self.n = n
@@ -35,6 +16,7 @@ class CluedoActor(ICluedoActor):
         self.public_cards = public_cards
         self.last_action = None
         self.knowledge = Knowledge(seat, n, hand, public_cards)
+        self.seed = seed
     
     def observe(self, event):
         #print("Observing game state:", game_state)

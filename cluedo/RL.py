@@ -13,6 +13,7 @@ from tensordict.nn import TensorDictModule
 from torchrl.modules import MLP, ProbabilisticActor, ValueOperator, MaskedCategorical
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
 from Actor import CluedoActor
+from Strategies import RandomActor, GambleActor
 
 class ClueEnv(EnvBase):
 
@@ -180,7 +181,7 @@ def make_critic():
     return ValueOperator(net, in_keys=["observation"])
 
 def train(total_frames=3_000_000, seed=0):
-    env = ClueEnv([CluedoActor], seed=seed, player_count=4)
+    env = ClueEnv([CluedoActor, RandomActor, GambleActor], seed=seed, player_count=4)
     actor = make_actor() 
     critic = make_critic()
 
@@ -232,6 +233,6 @@ def load_actor(path="learner.pt"):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "eval":
-        evaluate(load_actor(), [CluedoActor])
+        evaluate(load_actor(), [CluedoActor, RandomActor, GambleActor])
     else:
         train()
