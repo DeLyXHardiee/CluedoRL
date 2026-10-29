@@ -230,6 +230,9 @@ def train(total_frames=3_000_000, seed=0):
     actor = make_actor() 
     critic = make_critic()
 
+    # Collector is responsible for gathering experience from the environment using the actor policy.
+    # GAE (Generalized Advantage Estimation) is used to compute advantage estimates for policy gradient updates.
+    # ClipPPOLoss implements the PPO objective with clipping to stabilize training.
     collector = Collector(env, actor, frames_per_batch=4096, total_frames=total_frames)
     gae = GAE(gamma=0.99, lmbda=0.95, value_network=critic, average_gae=True)
     loss_func = ClipPPOLoss(actor, critic, clip_epsilon=0.2, entropy_coeff=0.01)
@@ -266,6 +269,7 @@ def evaluate(actor, opponent_factories, games=2000, seed=1):
             td = env.rollout(1000, policy=actor)
             wins += int(td["next", "reward"].sum().item() > 0)
     p = wins / games
+    # Compute the 95% confidence interval for the win rate.
     half = 1.96 * math.sqrt(p * (1 - p) / games)
     print(f"win rate {p:.3f} ± {half:.3f} over {games} games")
     return p
