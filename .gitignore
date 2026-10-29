@@ -39,3 +39,6 @@ rl-reason-game/wandb/
 # Python caches
 __pycache__/
 .pytest_cache/
+
+# Models
+*.pt

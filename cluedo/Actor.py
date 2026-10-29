@@ -1,5 +1,7 @@
 # Cluedo Actor Superclass
-from GameEngine import ActionTypes
+from GameEngine import ActionTypes, AFTER_SUGGEST
+
+UNKNOWN, YES, NO = 0, 1, 2
 
 class ICluedoActor:
     def reset(self, gameEngine, seat, n, hand, public_cards):
@@ -31,37 +33,18 @@ class CluedoActor(ICluedoActor):
         self.n = n
         self.hand = hand
         self.public_cards = public_cards
-        self.noteCard = []
-        self.game_state = None
         self.last_action = None
-
-        for card in self.hand:
-            if card not in self.noteCard:
-                self.noteCard.append(card)
-        for card in self.public_cards:
-            if card not in self.noteCard:
-                self.noteCard.append(card)
-
-    def updateGameState(self, game_state):
-        self.game_state = game_state
-        if "revealed_info" in game_state:
-            revealed_info = game_state["revealed_info"]
-            if revealed_info["revealed_card"] not in self.noteCard:
-                self.noteCard.append(revealed_info["revealed_card"])
+        self.knowledge = Knowledge(seat, n, hand, public_cards)
     
-    def observe(self, game_state):
+    def observe(self, event):
         #print("Observing game state:", game_state)
-        self.game_state = game_state
-        self.updateGameState(game_state)
-        if game_state["current_turn"] == self.seat:
-            self.act(game_state)
+        self.knowledge.observe(event)
     
     def act(self, game_state):
         action = self.strategy(game_state)
         #print("Acting with action:", action)
         self.last_action = action
-        self.gameEngine.step(self, action)
-        return
+        return action
 
     def choose_reveal(self, suggestion, suggesting_player):
         for card in suggestion:
@@ -69,17 +52,114 @@ class CluedoActor(ICluedoActor):
                 return card
 
     def strategy(self, game_state):
-        person = 0
-        weapon = 6
-        room = 12
-        while person in self.noteCard and person < 5:
-            person += 1
-        while weapon in self.noteCard and weapon < 11:
-            weapon += 1
-        while room in self.noteCard and room < 20:
-            room += 1
-        if self.last_action == [ActionTypes.SUGGEST, person, weapon, room]:
-            return [ActionTypes.ACCUSE, person, weapon, room]
-        if game_state["phase"] == "AFTER_SUGGEST":
-            return [ActionTypes.END]
-        return [ActionTypes.SUGGEST, person, weapon, room]
+        candidates = self.knowledge.candidates()
+        suspects = [c for c in candidates if c < 6]
+        weapons = [c for c in candidates if 6 <= c < 12]
+        rooms = [c for c in candidates if c >= 12]
+        guess = (suspects[0], weapons[0], rooms[0])
+        if len(suspects) == len(weapons) == len(rooms) == 1:
+            return (ActionTypes.ACCUSE, *guess)
+        if game_state["phase"] == AFTER_SUGGEST:
+            return (ActionTypes.END,)
+        return (ActionTypes.SUGGEST, *guess)
+
+    def get_knowledge(self):
+        return self.knowledge.table
+
+    def get_candidates(self):
+        return self.knowledge.candidates()
+
+    def get_accusation_candidates(self):
+        return self.knowledge.accusation_candidates()
+
+
+class Knowledge:
+    def __init__(self, seat, n, hand, face_up):
+        self.seat = seat
+        self.n = n
+        self.hand_size = 18 // n
+        self.table = [[UNKNOWN] * 21 for _ in range(n)]
+        self.one_of = []                # (answerer, set of cards) rules
+        self.wrong_accusations = set()
+        self.face_up = set(face_up)
+
+        # Rule 1: face-up cards are NO for everyone; my row is fully known
+        for card in face_up:
+            for s in range(n):
+                self.table[s][card] = NO
+        for card in range(21):
+            self.table[seat][card] = YES if card in hand else NO
+        
+        self.propagate()
+
+    def apply_owner_and_full_hands(self):
+      changed = False
+      # Rule 5: one owner per card
+      for card in range(21):
+          owners = [s for s in range(self.n) if self.table[s][card] == YES]
+          if owners:
+              for s in range(self.n):
+                  if s != owners[0] and self.table[s][card] == UNKNOWN:
+                      self.table[s][card] = NO
+                      changed = True
+      # Rule 6: a full hand means the rest of that row is NO
+      for s in range(self.n):
+          if self.table[s].count(YES) == self.hand_size:
+              for card in range(21):
+                  if self.table[s][card] == UNKNOWN:
+                      self.table[s][card] = NO
+                      changed = True
+      return changed
+
+    def observe(self, event):
+        if event["kind"] == ActionTypes.SUGGEST:
+            # Rule 2: everyone who passed has none of the three cards
+            for s in event["passed"]:
+                for card in event["cards"]:
+                    self.table[s][card] = NO
+            # Rule 3: a card shown to me
+            if event["shown"] is not None:
+                self.table[event["answerer"]][event["shown"]] = YES
+            # Rule 4: someone else answered, so they hold at least one of the three
+            elif event["answerer"] is not None:
+                self.one_of.append((event["answerer"], set(event["cards"])))
+        elif event["kind"] == ActionTypes.ACCUSE and not event["correct"]:
+            self.wrong_accusations.add(tuple(event["cards"]))
+        self.propagate()
+
+    def apply_one_of(self):
+      changed = False
+      remaining = []
+      for answerer, cards in self.one_of:
+          if any(self.table[answerer][c] == YES for c in cards):
+              continue    # already explained, nothing more to note
+          cards = {c for c in cards if self.table[answerer][c] != NO}
+          if len(cards) == 1:
+              self.table[answerer][cards.pop()] = YES
+              changed = True
+          else:
+              remaining.append((answerer, cards))
+      self.one_of = remaining
+      return changed
+
+    def propagate(self):
+        while self.apply_one_of() | self.apply_owner_and_full_hands(): 
+            pass
+
+    def candidates(self):
+        result = []
+        for lo, hi in ((0, 6), (6, 12), (12, 21)):
+            cards = [c for c in range(lo, hi)
+                    if c not in self.face_up
+                    and all(self.table[s][c] != YES for s in range(self.n))]
+            known = [c for c in cards if all(self.table[s][c] == NO for s in range(self.n))]
+            result += known[:1] or cards # weird syntax, but known has to be a list to append to result
+        return result
+
+    def accusation_candidates(self):
+        c = self.candidates()
+        return [(s, w, r)
+                for s in c if s < 6
+                for w in c if 6 <= w < 12
+                for r in c if r >= 12
+                if (s, w, r) not in self.wrong_accusations]

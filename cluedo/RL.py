@@ -1,10 +1,18 @@
 import random
 import torch
+import math
 from torchrl.envs import EnvBase
-from torchrl.data import Composite, Unbounded, Binary, Categorical
+from torchrl.envs.utils import set_exploration_type, ExplorationType
+from torchrl.data import Composite, Unbounded, Binary, Categorical, ReplayBuffer, LazyTensorStorage
+from torchrl.collectors import Collector
+from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
+from torchrl.objectives import ClipPPOLoss
+from torchrl.objectives.value import GAE
 from tensordict import TensorDict
+from tensordict.nn import TensorDictModule
+from torchrl.modules import MLP, ProbabilisticActor, ValueOperator, MaskedCategorical
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
-from Actor import Actor
+from Actor import CluedoActor
 
 class ClueEnv(EnvBase):
 
@@ -49,11 +57,11 @@ class ClueEnv(EnvBase):
         while True:
             self.game = CluedoGameEngine(self.player_count, self.rng.getrandbits(32))
             self.seat = self.rng.randint(0, self.player_count - 1)
-            self.actor = Actor(self.seat, self.rng)
+            self.actor = CluedoActor()
             actors = []
             for i in range(self.player_count):
                 if i != self.seat:
-                    opponent = self.rng.choice(self.opponent_factories)(self.rng)
+                    opponent = self.rng.choice(self.opponent_factories)()
                     actors.append(opponent)
                     continue
                 actors.append(self.actor)
@@ -76,14 +84,14 @@ class ClueEnv(EnvBase):
         
 
     def _step(self, tensordict=None):
-        action = int(tensordict["action"])
+        action = self.actions[int(tensordict["action"])]
         self.game.step(action)
 
-        eliminated = self.game.eliminated[self.seat]
+        eliminated = self.actor in self.game.eliminated_players
         if not eliminated:
             self.game.play(stop_at=self.seat)
 
-        won = self.game.winner == self.seat
+        won = self.game.winner is self.actor
         truncated = self.game.truncated
         terminated = eliminated or (self.game.done and not truncated)
         done = terminated or truncated
@@ -105,7 +113,7 @@ class ClueEnv(EnvBase):
 
     def build_observation(self, accusation_candidates):
         # Notepad grid
-        knowledge = self.actor.get_knowledge()
+        knowledge = torch.tensor(self.actor.get_knowledge(), dtype=torch.int64)
         grid = torch.roll(knowledge, shifts=-self.seat, dims=0)
         grid = torch.nn.functional.one_hot(grid, num_classes=3)
         grid = grid.flatten().float()
@@ -124,17 +132,17 @@ class ClueEnv(EnvBase):
         solve[0] = suspects.sum() / 6.0 # how many candidates remain in suspects
         solve[1] = weapons.sum() / 6.0 # ... weapons
         solve[2] = rooms.sum() / 9.0 # ... rooms
-        solve[3] = len(accusation_candidates) / self.combination_count # how many candidates remain in total
+        solve[3] = 1.0 / max(len(accusation_candidates), 1) # how many candidates remain in total, computed so 1.0 when solved, 0.5 at two left, 0.33 at three etc.
 
         # Game state
         state = torch.zeros(6, dtype=torch.float32)
-        eliminated = torch.tensor(self.game.eliminated, dtype=torch.float32)
+        eliminated = torch.tensor([p in self.game.eliminated_players for p in self.game.players], dtype=torch.float32)
         eliminated = torch.roll(eliminated, shifts=-self.seat, dims=0)
         for i in range(len(eliminated)):
             if eliminated[i]:
                 state[i] = 1.0
         state[4] = 1.0 if self.game.phase == AFTER_SUGGEST else 0.0
-        state[5] = self.game.turn / self.game.max_turns
+        state[5] = self.game.turns_taken / self.game.max_turns
 
         encoded = torch.cat([grid, cand, solve, state], dim=0)
         return encoded
@@ -154,3 +162,76 @@ class ClueEnv(EnvBase):
 
         assert action_mask.any(), "No valid actions available"
         return action_mask
+
+
+def make_actor():
+      net = MLP(in_features=283, out_features=649, num_cells=[256, 256])
+      module = TensorDictModule(net, in_keys=["observation"], out_keys=["logits"])
+      return ProbabilisticActor(
+          module,
+          in_keys={"logits": "logits", "mask": "action_mask"},
+          out_keys=["action"],
+          distribution_class=MaskedCategorical,
+          return_log_prob=True,
+      )
+
+def make_critic():
+    net = MLP(in_features=283, out_features=1, num_cells=[256, 256])
+    return ValueOperator(net, in_keys=["observation"])
+
+def train(total_frames=3_000_000, seed=0):
+    env = ClueEnv([CluedoActor], seed=seed, player_count=4)
+    actor = make_actor() 
+    critic = make_critic()
+
+    collector = Collector(env, actor, frames_per_batch=4096, total_frames=total_frames)
+    gae = GAE(gamma=0.99, lmbda=0.95, value_network=critic, average_gae=True)
+    loss_func = ClipPPOLoss(actor, critic, clip_epsilon=0.2, entropy_coeff=0.01)
+    buffer = ReplayBuffer(storage=LazyTensorStorage(4096), sampler=SamplerWithoutReplacement())
+    optim = torch.optim.Adam(loss_func.parameters(), lr=3e-4)
+
+    for i, batch in enumerate(collector):
+          with torch.no_grad():
+              gae(batch)
+          buffer.extend(batch.reshape(-1))
+
+          for _ in range(4):                      # epochs
+              for _ in range(4096 // 512):        # minibatches
+                  mb = buffer.sample(512)
+                  losses = loss_func(mb)
+                  loss = losses["loss_objective"] + losses["loss_critic"] + losses["loss_entropy"]
+                  optim.zero_grad()
+                  loss.backward()
+                  torch.nn.utils.clip_grad_norm_(loss_func.parameters(), 0.5)
+                  optim.step()
+
+          wins = batch["next", "reward"].sum()
+          games = batch["next", "done"].sum()
+          print(f"batch {i}: win rate {(wins / games).item():.3f}, loss {loss.item():.3f}")
+
+    torch.save(actor.state_dict(), "learner.pt")
+    return actor
+
+def evaluate(actor, opponent_factories, games=2000, seed=1):
+    env = ClueEnv(opponent_factories, seed=seed, player_count=4)
+    wins = 0
+    with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
+        for _ in range(games):
+            td = env.rollout(1000, policy=actor)
+            wins += int(td["next", "reward"].sum().item() > 0)
+    p = wins / games
+    half = 1.96 * math.sqrt(p * (1 - p) / games)
+    print(f"win rate {p:.3f} ± {half:.3f} over {games} games")
+    return p
+
+def load_actor(path="learner.pt"):
+    actor = make_actor()
+    actor.load_state_dict(torch.load(path))
+    return actor
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "eval":
+        evaluate(load_actor(), [CluedoActor])
+    else:
+        train()

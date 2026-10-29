@@ -29,6 +29,7 @@ class CluedoGameEngine:
     def __init__(self, n=4, seed=None):
         self.n = n
         self.seed = seed
+        self.max_turns = 200
         self.players = []
         self.envelope = None
         self.current_turn = 0
@@ -36,6 +37,8 @@ class CluedoGameEngine:
         self.hands = {}
         self.eliminated_players = []
         self.winner = None
+        self.done = False
+        self.truncated = False
         self.phase = MAIN
         self.rng = None
         self.turns = []
@@ -49,6 +52,11 @@ class CluedoGameEngine:
         if player not in self.players and len(self.players) < self.playerLimit:
             self.players.append(player)
 
+
+    def start(self, actors):
+        self.players = list(actors)
+        self.start_game()
+
     #Step 1
     def start_game(self):
         #print("Starting game with players:", [self.players.index(player) for player in self.players])
@@ -57,6 +65,8 @@ class CluedoGameEngine:
         self.turns_taken = 0
         self.eliminated_players = []
         self.winner = None
+        self.done = False
+        self.truncated = False
         self.phase = MAIN
         self.turns = []
         self.hands = {}
@@ -100,21 +110,19 @@ class CluedoGameEngine:
             self.hands[player].append(card)
         for player in self.players:
             player.reset(self, self.players.index(player), len(self.players), self.hands[player], self.publicCards)
-        self.broadcastGameState()
 
     def next_turn(self):
         self.phase = MAIN
         self.current_turn = (self.current_turn + 1) % len(self.players)
         self.turns_taken += 1
-        if self.turns_taken > 200:
-            self.printToFile(self.turns)
-            raise RuntimeError("Maximum number of turns exceeded.")
+        if self.turns_taken >= self.max_turns:
+            self.done = True
+            self.truncated = True
 
     # Currently accusing after suggesting doesnt work
-    def step(self, player, action):
+    def step(self, action):
+        player = self.players[self.current_turn]
         self.turns.append((self.turns_taken, player.seat, action))
-        if player != self.players[self.current_turn]:
-            return
         if player in self.eliminated_players:
             self.next_turn()
             return
@@ -126,33 +134,53 @@ class CluedoGameEngine:
             return
         elif action[0] == ActionTypes.SUGGEST:
             suggestion = action[1:]
-            revealed_card, revealed_by = self.suggestLoop(player, suggestion)
+            revealed_card, revealed_by, passed = self.suggestLoop(player, suggestion)
             #print(f"Suggestion made by {player.seat}: {suggestion}, revealed card: {revealed_card}, revealed by: {revealed_by.seat if revealed_by else revealed_by}")
             self.turns[-1] = (self.turns_taken, player.seat, action, (revealed_card, revealed_by.seat if revealed_by else revealed_by))
             self.phase = AFTER_SUGGEST
-            self.broadcastReveal(revealed_card, revealed_by, player)
+            self.broadcastEvent({
+                "turn": self.turns_taken, "kind": SUGGEST, "seat": player.seat,
+                "cards": tuple(suggestion), "passed": passed,
+                "answerer": revealed_by.seat if revealed_by else None,
+                "shown": revealed_card, "correct": None,
+            })
             return
         elif action[0] == ActionTypes.ACCUSE:
             accusation = action[1:]
-            if self.accuse(accusation):
+            correct = self.accuse(accusation)
+            self.broadcastEvent({
+                "turn": self.turns_taken, "kind": ACCUSE, "seat": player.seat,
+                "cards": tuple(accusation), "passed": [], "answerer": None,
+                "shown": None, "correct": correct,
+            })
+            if correct:
                 self.winner = player
+                self.done = True
             else:
                 self.eliminated_players.append(player)
+                if len(self.eliminated_players) == len(self.players):
+                    self.done = True
                 self.next_turn()
-            self.broadcastGameState()
             return
 
+    def play(self, stop_at=None):
+        while not self.done and self.current_turn != stop_at:
+            player = self.players[self.current_turn]
+            action = player.act({**self.publicGameState, "phase": self.phase})
+            self.step(action)
+
     def suggestLoop(self, player, suggestion):
-        for i in range(len(self.players)):
+        passed = []
+        for i in range(1, len(self.players)):
             next_player = self.players[(self.current_turn + i) % len(self.players)]
-            for card in suggestion:
-                if card in self.hands[next_player]:
-                    revealed = next_player.choose_reveal(suggestion, player)
-                    if revealed not in suggestion:
-                        revealed = card
-                        break
-                    return revealed,next_player
-        return None, None
+            matching = [card for card in suggestion if card in self.hands[next_player]]
+            if matching:
+                revealed = next_player.choose_reveal(matching, player)
+                if revealed not in matching:
+                    revealed = matching[0]
+                return revealed, next_player, passed
+            passed.append(next_player.seat)
+        return None, None, passed
 
     def accuse(self,accusation):
         combination = {
@@ -196,6 +224,13 @@ class CluedoGameEngine:
                     "suggesting_player": suggesting_player
                 })
         self.broadcastGameState()
+
+    def broadcastEvent(self, event):
+        for player in self.players:
+            view = dict(event)
+            if player.seat not in (event["seat"], event["answerer"]):
+                view["shown"] = None
+            player.observe(view)
 
     def broadcastGameState(self):
         # Update the public game state
