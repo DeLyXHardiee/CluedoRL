@@ -1,12 +1,12 @@
 # Cluedo Actor Superclass
-from GameEngine import ActionTypes, AFTER_SUGGEST
+from GameEngine import ActionTypes, Phase
 
 UNKNOWN, YES, NO = 0, 1, 2
 
 class CluedoActor():
 
-    def __init__(self):
-        pass
+    def __init__(self, strategy):
+        self.strategy = strategy
 
     def reset(self, gameEngine, seat, n, hand, public_cards, seed):
         self.gameEngine = gameEngine
@@ -23,7 +23,7 @@ class CluedoActor():
         self.knowledge.observe(event)
     
     def act(self, game_state):
-        action = self.strategy(game_state)
+        action = self.strategy.getStrategy(game_state, self.knowledge, self.seed)
         #print("Acting with action:", action)
         self.last_action = action
         return action
@@ -33,19 +33,6 @@ class CluedoActor():
         for card in suggestion:
             if card in self.hand:
                 return card
-
-    # Default strategy, always suggest the first candidate cards and accuse only when certain
-    def strategy(self, game_state):
-        candidates = self.knowledge.candidates()
-        suspects = [c for c in candidates if c < 6]
-        weapons = [c for c in candidates if 6 <= c < 12]
-        rooms = [c for c in candidates if c >= 12]
-        guess = (suspects[0], weapons[0], rooms[0])
-        if len(suspects) == len(weapons) == len(rooms) == 1:
-            return (ActionTypes.ACCUSE, *guess)
-        if game_state["phase"] == AFTER_SUGGEST:
-            return (ActionTypes.END,)
-        return (ActionTypes.SUGGEST, *guess)
 
     def get_knowledge(self):
         return self.knowledge.table
