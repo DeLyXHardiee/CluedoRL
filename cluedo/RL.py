@@ -15,18 +15,32 @@ from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MA
 from Actor import CluedoActor
 from Strategies import RandomActor, GambleActor
 
+def build_actions():
+    # lookup table
+    actions = []
+    for kind in (SUGGEST, ACCUSE):
+        for suspect in range(0, 6):
+            for weapon in range(6, 12):
+                for room in range(12, 21):
+                    actions.append((kind, suspect, weapon, room))
+    actions.append((END,))
+    return actions
+
+ACTIONS = build_actions()
+ACTION_TO_INDEX = {action: index for index, action in enumerate(ACTIONS)}
+COMBINATION_COUNT = 6 * 6 * 9 # suspects * weapons * rooms
+
 class ClueEnv(EnvBase):
 
     def __init__(self, opponent_factories, seed, player_count):
         super().__init__()
         self.opponent_factories = opponent_factories
         self.player_count = player_count
-        self.combination_count = 6 * 6 * 9 # suspects * weapons * rooms
 
-        self.actions = build_actions()
+        self.actions = ACTIONS
 
         # dictionary of action to index
-        self.action_to_index = {action: index for index, action in enumerate(self.actions)}
+        self.action_to_index = ACTION_TO_INDEX
 
         self.observation_spec = Composite(
             observation=Unbounded(shape=(283,), dtype=torch.float32),
@@ -64,8 +78,8 @@ class ClueEnv(EnvBase):
             if not self.game.done:
                 break
 
-        self.observation = self.build_observation(self.actor.get_accusation_candidates())
-        self.action_mask = self.build_action_mask(self.actor.get_accusation_candidates())
+        self.observation = build_observation(self.actor)
+        self.action_mask = build_action_mask(self.actor)
 
         return TensorDict({
             "observation": self.observation,
@@ -90,9 +104,8 @@ class ClueEnv(EnvBase):
         done = terminated or truncated
         reward = 1.0 if won else 0.0
 
-        candidates = self.actor.get_accusation_candidates()
-        observation = self.build_observation(candidates)
-        action_mask = self.build_action_mask(candidates)
+        observation = build_observation(self.actor)
+        action_mask = build_action_mask(self.actor)
 
         tensordict = TensorDict({
             "observation": observation,
@@ -103,59 +116,6 @@ class ClueEnv(EnvBase):
             "reward": torch.tensor([reward], dtype=torch.float32)
         }, batch_size=())
         return tensordict
-
-    def build_observation(self, accusation_candidates):
-        # Notepad grid
-        knowledge = torch.tensor(self.actor.get_knowledge(), dtype=torch.int64)
-        grid = torch.roll(knowledge, shifts=-self.seat, dims=0)
-        grid = torch.nn.functional.one_hot(grid, num_classes=3)
-        grid = grid.flatten().float()
-        
-        # Envelope candidates
-        candidates = self.actor.get_candidates()
-        cand = torch.zeros(21, dtype=torch.float32)
-        for i in range(len(candidates)):
-            cand[candidates[i]] = 1.0
-        
-        # How close learner is to solving
-        suspects = cand[:6]
-        weapons = cand[6:12]
-        rooms = cand[12:21]
-        solve = torch.zeros(4, dtype=torch.float32)
-        solve[0] = suspects.sum() / 6.0 # how many candidates remain in suspects
-        solve[1] = weapons.sum() / 6.0 # ... weapons
-        solve[2] = rooms.sum() / 9.0 # ... rooms
-        solve[3] = 1.0 / max(len(accusation_candidates), 1) # how many candidates remain in total, computed so 1.0 when solved, 0.5 at two left, 0.33 at three etc.
-
-        # Game state
-        state = torch.zeros(6, dtype=torch.float32)
-        eliminated = torch.tensor([p in self.game.eliminated_players for p in self.game.players], dtype=torch.float32)
-        eliminated = torch.roll(eliminated, shifts=-self.seat, dims=0)
-        for i in range(len(eliminated)):
-            if eliminated[i]:
-                state[i] = 1.0
-        state[4] = 1.0 if self.game.phase == AFTER_SUGGEST else 0.0
-        state[5] = self.game.turns_taken / self.game.max_turns
-
-        encoded = torch.cat([grid, cand, solve, state], dim=0)
-        return encoded
-
-    def build_action_mask(self, accusation_candidates):
-        action_mask = torch.zeros(len(self.actions), dtype=torch.bool)
-
-        if self.game.phase == MAIN:
-            action_mask[0:self.combination_count] = True
-
-        for candidate in accusation_candidates:
-            index = self.action_to_index[(ACCUSE, candidate[0], candidate[1], candidate[2])]
-            action_mask[index] = True
-
-        if self.game.phase == AFTER_SUGGEST:
-            action_mask[-1] = True 
-
-        assert action_mask.any(), "No valid actions available"
-        return action_mask
-
 
 class FactoredPolicy(torch.nn.Module):
     
@@ -200,16 +160,82 @@ class FactoredPolicy(torch.nn.Module):
         output = torch.cat((output, zeros_column), dim=-1)
         return output[..., self.kind_idx] + output[..., self.s_idx] + output[..., self.w_idx] + output[..., self.r_idx] # one logit per slot in action table's order
 
-def build_actions():
-    # lookup table
-    actions = []
-    for kind in (SUGGEST, ACCUSE):
-        for suspect in range(0, 6):
-            for weapon in range(6, 12):
-                for room in range(12, 21):
-                    actions.append((kind, suspect, weapon, room))
-    actions.append((END,))
-    return actions
+def build_observation(actor):
+    game = actor.gameEngine
+    accusation_candidates = actor.get_accusation_candidates()
+
+    # Notepad grid
+    knowledge = torch.tensor(actor.get_knowledge(), dtype=torch.int64)
+    grid = torch.roll(knowledge, shifts=-actor.seat, dims=0)
+    grid = torch.nn.functional.one_hot(grid, num_classes=3)
+    grid = grid.flatten().float()
+    
+    # Envelope candidates
+    candidates = actor.get_candidates()
+    cand = torch.zeros(21, dtype=torch.float32)
+    for i in range(len(candidates)):
+        cand[candidates[i]] = 1.0
+    
+    # How close learner is to solving
+    suspects = cand[:6]
+    weapons = cand[6:12]
+    rooms = cand[12:21]
+    solve = torch.zeros(4, dtype=torch.float32)
+    solve[0] = suspects.sum() / 6.0 # how many candidates remain in suspects
+    solve[1] = weapons.sum() / 6.0 # ... weapons
+    solve[2] = rooms.sum() / 9.0 # ... rooms
+    solve[3] = 1.0 / max(len(accusation_candidates), 1) # how many candidates remain in total, computed so 1.0 when solved, 0.5 at two left, 0.33 at three etc.
+
+    # Game state
+    state = torch.zeros(6, dtype=torch.float32)
+    eliminated = torch.tensor([p in game.eliminated_players for p in game.players], dtype=torch.float32)
+    eliminated = torch.roll(eliminated, shifts=-actor.seat, dims=0)
+    for i in range(len(eliminated)):
+        if eliminated[i]:
+            state[i] = 1.0
+    state[4] = 1.0 if game.phase == AFTER_SUGGEST else 0.0
+    state[5] = game.turns_taken / game.max_turns
+
+    encoded = torch.cat([grid, cand, solve, state], dim=0)
+    return encoded
+
+def build_action_mask(actor):
+    game = actor.gameEngine
+    accusation_candidates = actor.get_accusation_candidates()
+
+    action_mask = torch.zeros(len(ACTIONS), dtype=torch.bool)
+
+    if game.phase == MAIN:
+        action_mask[0:COMBINATION_COUNT] = True
+
+    for candidate in accusation_candidates:
+        index = ACTION_TO_INDEX[(ACCUSE, candidate[0], candidate[1], candidate[2])]
+        action_mask[index] = True
+
+    if game.phase == AFTER_SUGGEST:
+        action_mask[-1] = True 
+
+    assert action_mask.any(), "No valid actions available"
+    return action_mask
+
+
+class RLActor(CluedoActor):
+
+    def __init__(self, policy):
+        super().__init__()
+        self.policy = policy
+
+    def strategy(self, game_state):
+        tensordict = TensorDict({
+            "observation": build_observation(self),
+            "action_mask": build_action_mask(self),
+        }, batch_size=())
+
+        with torch.no_grad():
+            tensordict = self.policy(tensordict)
+        
+        return ACTIONS[int(tensordict["action"])]
+
 
 def make_actor():
       module = TensorDictModule(FactoredPolicy(), in_keys=["observation"], out_keys=["logits"])
@@ -225,9 +251,27 @@ def make_critic():
     net = MLP(in_features=283, out_features=1, num_cells=[256, 256])
     return ValueOperator(net, in_keys=["observation"])
 
-def train(total_frames=3_000_000, seed=0):
-    env = ClueEnv([CluedoActor, RandomActor, GambleActor], seed=seed, player_count=4)
-    actor = make_actor() 
+def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, pool_size=20):
+    def snapshot():
+        actor_inner = make_actor()
+        actor_inner.load_state_dict(actor.state_dict())
+        pool.append(actor_inner)
+
+    def self_play_opponent():
+        policy = pool_rng.choice(pool)
+        return RLActor(policy)
+    
+    actor = make_actor()
+    pool = []
+    pool_rng = random.Random(seed)
+
+    snapshot()
+
+    opponent_factories = [CluedoActor, RandomActor, GambleActor]
+    if self_play:
+        opponent_factories = [self_play_opponent]
+
+    env = ClueEnv(opponent_factories, seed=seed, player_count=4)
     critic = make_critic()
 
     # Collector is responsible for gathering experience from the environment using the actor policy.
@@ -240,23 +284,28 @@ def train(total_frames=3_000_000, seed=0):
     optim = torch.optim.Adam(loss_func.parameters(), lr=3e-4)
 
     for i, batch in enumerate(collector):
-          with torch.no_grad():
-              gae(batch)
-          buffer.extend(batch.reshape(-1))
+        with torch.no_grad():
+            gae(batch)
+        buffer.extend(batch.reshape(-1))
 
-          for _ in range(4):                      # epochs
-              for _ in range(4096 // 512):        # minibatches
-                  mb = buffer.sample(512)
-                  losses = loss_func(mb)
-                  loss = losses["loss_objective"] + losses["loss_critic"] + losses["loss_entropy"]
-                  optim.zero_grad()
-                  loss.backward()
-                  torch.nn.utils.clip_grad_norm_(loss_func.parameters(), 0.5)
-                  optim.step()
+        for _ in range(4):                      # epochs
+            for _ in range(4096 // 512):        # minibatches
+                mb = buffer.sample(512)
+                losses = loss_func(mb)
+                loss = losses["loss_objective"] + losses["loss_critic"] + losses["loss_entropy"]
+                optim.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(loss_func.parameters(), 0.5)
+                optim.step()
 
-          wins = batch["next", "reward"].sum()
-          games = batch["next", "done"].sum()
-          print(f"batch {i}: win rate {(wins / games).item():.3f}, loss {loss.item():.3f}")
+        if self_play and (i + 1) % snapshot_every == 0:
+            snapshot()
+            if len(pool) > pool_size:
+                pool.pop(0)
+
+        wins = batch["next", "reward"].sum()
+        games = batch["next", "done"].sum()
+        print(f"batch {i}: win rate {(wins / games).item():.3f}, loss {loss.item():.3f}")
 
     torch.save(actor.state_dict(), "learner.pt")
     return actor
@@ -283,5 +332,7 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "eval":
         evaluate(load_actor(), [CluedoActor, RandomActor, GambleActor])
+    elif len(sys.argv) > 1 and sys.argv[1] == "self":
+        train(self_play=True)
     else:
         train()
