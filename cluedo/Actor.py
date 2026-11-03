@@ -6,8 +6,9 @@ UNKNOWN, YES, NO = 0, 1, 2
 
 class CluedoActor():
 
-    def __init__(self, strategy):
+    def __init__(self, strategy, knowledge_class=None):
         self.strategy = strategy
+        self.knowledge_class = knowledge_class or Knowledge
 
     def reset(self, gameEngine, seat, n, hand, public_cards, seed):
         self.gameEngine = gameEngine
@@ -16,7 +17,7 @@ class CluedoActor():
         self.hand = hand
         self.public_cards = public_cards
         self.last_action = None
-        self.knowledge = Knowledge(seat, n, hand, public_cards)
+        self.knowledge = self.knowledge_class(seat, n, hand, public_cards)
         self.seed = seed
         self.rng = random.Random(f"{seed}-{seat}")
     
@@ -55,6 +56,7 @@ class Knowledge:
         self.one_of = []                # (answerer, set of cards) rules
         self.wrong_accusations = set()
         self.face_up = set(face_up)
+        self.hand = hand
 
         # Rule 1: face-up cards are NO for everyone; my row is fully known
         for card in face_up:
@@ -140,3 +142,12 @@ class Knowledge:
                 for w in c if 6 <= w < 12
                 for r in c if r >= 12
                 if (s, w, r) not in self.wrong_accusations]
+
+class GullibleKnowledge(Knowledge):
+    # update player to NO on cards that they suggest unless they are already explicitly known to have them
+    def observe(self, event):
+        if event["kind"] == ActionTypes.SUGGEST:
+            for card in event["cards"]:
+                if self.table[event["player"]][card] != YES:
+                    self.table[event["player"]][card] = NO
+        super().observe(event)

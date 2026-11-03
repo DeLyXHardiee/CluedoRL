@@ -16,8 +16,9 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.modules import MLP, ProbabilisticActor, ValueOperator, MaskedCategorical
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
-from Actor import CluedoActor
-from Strategies import Strategy
+from Actor import CluedoActor, Knowledge, GullibleKnowledge
+from functools import partial
+from Strategies import Strategy, main_first, after_suggest_certain, main_random, main_gamble, main_bluff, after_suggest_gamble
 
 def build_actions():
     # lookup table
@@ -69,7 +70,7 @@ class ClueEnv(EnvBase):
             self.game = CluedoGameEngine(self.player_count, self.rng.getrandbits(32))
             self.seat = self.rng.randint(0, self.player_count - 1)
             #Should this actor have a strategy assigned?
-            self.actor = CluedoActor(Strategy("first", "certain"))
+            self.actor = CluedoActor(Strategy(main=main_first, after_suggest=after_suggest_certain))
             actors = []
             for i in range(self.player_count):
                 if i != self.seat:
@@ -312,7 +313,7 @@ def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, po
 
     snapshot()
 
-    opponent_factories = [CluedoActor(Strategy()), CluedoActor(Strategy("first", "certain")), CluedoActor(Strategy("first", "gamble"))]
+    opponent_factories = [CluedoActor(Strategy()), CluedoActor(Strategy(main_first, after_suggest_certain)), CluedoActor(Strategy(main_first, after_suggest_gamble))]
     if self_play:
         opponent_factories = [self_play_opponent]
 
@@ -405,7 +406,7 @@ def load_actor(path="models/learner.pt"):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "eval":
-        evaluate(load_actor(), [CluedoActor, CluedoActor(Strategy("random", "certain")), CluedoActor(Strategy("first", "gamble"))])
+        evaluate(load_actor(), [lambda: CluedoActor(Strategy(main=partial(main_gamble, threshold=0.5), after_suggest=after_suggest_certain, knowledge=GullibleKnowledge))])
     elif len(sys.argv) > 1 and sys.argv[1] == "self":
         train(self_play=True)
     else:
