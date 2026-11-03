@@ -138,7 +138,7 @@ class FactoredPolicy(torch.nn.Module):
                 kind_idx.append(2)
                 s_idx.append(45)
                 w_idx.append(45)
-                r_idx.append(45) # the always zero position
+                r_idx.append(45) # the always zero position for the END action
                 continue
 
             _, s, w, r = action
