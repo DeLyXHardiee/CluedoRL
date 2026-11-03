@@ -252,6 +252,8 @@ def make_critic():
     return ValueOperator(net, in_keys=["observation"])
 
 def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, pool_size=20):
+    torch.manual_seed(seed)
+    
     def snapshot():
         actor_inner = make_actor()
         actor_inner.load_state_dict(actor.state_dict())
