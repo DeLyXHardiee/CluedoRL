@@ -307,7 +307,7 @@ def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, po
         games = batch["next", "done"].sum()
         print(f"batch {i}: win rate {(wins / games).item():.3f}, loss {loss.item():.3f}")
 
-    torch.save(actor.state_dict(), "learner.pt")
+    torch.save(actor.state_dict(), "models/learner.pt")
     return actor
 
 def evaluate(actor, opponent_factories, games=2000, seed=1):
@@ -323,7 +323,7 @@ def evaluate(actor, opponent_factories, games=2000, seed=1):
     print(f"win rate {p:.3f} ± {half:.3f} over {games} games")
     return p
 
-def load_actor(path="learner.pt"):
+def load_actor(path="models/learner.pt"):
     actor = make_actor()
     actor.load_state_dict(torch.load(path))
     return actor
