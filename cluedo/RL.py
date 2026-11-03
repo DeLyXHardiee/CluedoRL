@@ -12,7 +12,7 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.modules import MLP, ProbabilisticActor, ValueOperator, MaskedCategorical
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
-from Actor import CluedoActor
+from Actor import CluedoActor, Knowledge, GullibleKnowledge
 from functools import partial
 from Strategies import Strategy, main_first, after_suggest_certain, main_random, main_gamble, main_bluff, after_suggest_gamble
 
@@ -240,6 +240,6 @@ def load_actor(path="learner.pt"):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "eval":
-        evaluate(load_actor(), [lambda: CluedoActor(Strategy(main=partial(main_gamble, threshold=0.5), after_suggest=after_suggest_certain))])
+        evaluate(load_actor(), [lambda: CluedoActor(Strategy(main=partial(main_gamble, threshold=0.5), after_suggest=after_suggest_certain, knowledge=GullibleKnowledge))])
     else:
         train()
