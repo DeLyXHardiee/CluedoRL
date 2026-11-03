@@ -1,6 +1,6 @@
 ### What's missing
 [x] Torch needs to be seeded just like the env
-[ ] Code to stop training when converged (define convergence) (we should use a different eval seed for the stopping chekc than for the final results)
+[x] Code to stop training when converged (define convergence) (we should use a different eval seed for the stopping check than for the final results)
 [ ] Code to plot training and other interesting data
 [ ] Build a strategy that might fall for bluffing
 [ ] Build a baseline "smart" strategy

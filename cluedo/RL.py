@@ -1,6 +1,10 @@
 import random
 import torch
 import math
+import os
+import csv
+import json
+import time
 from torchrl.envs import EnvBase
 from torchrl.envs.utils import set_exploration_type, ExplorationType
 from torchrl.data import Composite, Unbounded, Binary, Categorical, ReplayBuffer, LazyTensorStorage
@@ -251,9 +255,47 @@ def make_critic():
     net = MLP(in_features=283, out_features=1, num_cells=[256, 256])
     return ValueOperator(net, in_keys=["observation"])
 
-def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, pool_size=20):
+def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, pool_size=20, run_name="run", checkpoint_every=100, eval_games=2000, eval_seed=1000, patience=5, min_delta=0.01):
     torch.manual_seed(seed)
-    
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    run_name = f"{run_name}_{timestamp}_{seed}"
+    run_dir = os.path.join("checkpoints", run_name)
+    os.makedirs(run_dir, exist_ok=True)
+
+    learning_rate = 3e-4
+    clip = 0.2
+    entropy = 0.01
+    gamma = 0.99
+    lmbda = 0.95
+    batch_size = 4096
+    minibatch_size = 512
+    epochs = 4
+
+    config = {
+        "total_frames": total_frames,
+        "seed": seed,
+        "self_play": self_play,
+        "snapshot_every": snapshot_every,
+        "pool_size": pool_size,
+        "run_name": run_name,
+        "checkpoint_every": checkpoint_every,
+        "learning_rate": learning_rate,
+        "clip": clip,
+        "entropy": entropy,
+        "gamma": gamma,
+        "lambda": lmbda,
+        "batch_size": batch_size,
+        "minibatch_size": minibatch_size,
+        "epochs": epochs
+        "eval_games": eval_games,
+        "eval_seed": eval_seed,
+        "patience": patience,
+        "min_delta": min_delta
+    }
+
+    with open(os.path.join(run_dir, "config.json"), "w") as f:
+        json.dump(config, f, indent=2)
+
     def snapshot():
         actor_inner = make_actor()
         actor_inner.load_state_dict(actor.state_dict())
@@ -279,37 +321,66 @@ def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, po
     # Collector is responsible for gathering experience from the environment using the actor policy.
     # GAE (Generalized Advantage Estimation) is used to compute advantage estimates for policy gradient updates.
     # ClipPPOLoss implements the PPO objective with clipping to stabilize training.
-    collector = Collector(env, actor, frames_per_batch=4096, total_frames=total_frames)
-    gae = GAE(gamma=0.99, lmbda=0.95, value_network=critic, average_gae=True)
-    loss_func = ClipPPOLoss(actor, critic, clip_epsilon=0.2, entropy_coeff=0.01)
-    buffer = ReplayBuffer(storage=LazyTensorStorage(4096), sampler=SamplerWithoutReplacement())
-    optim = torch.optim.Adam(loss_func.parameters(), lr=3e-4)
+    collector = Collector(env, actor, frames_per_batch=batch_size, total_frames=total_frames)
+    gae = GAE(gamma=gamma, lmbda=lmbda, value_network=critic, average_gae=True)
+    loss_func = ClipPPOLoss(actor, critic, clip_epsilon=clip, entropy_coeff=entropy)
+    buffer = ReplayBuffer(storage=LazyTensorStorage(batch_size), sampler=SamplerWithoutReplacement())
+    optim = torch.optim.Adam(loss_func.parameters(), lr=learning_rate)
 
-    for i, batch in enumerate(collector):
-        with torch.no_grad():
-            gae(batch)
-        buffer.extend(batch.reshape(-1))
+    with open(os.path.join(run_dir, "train_log.csv"), "w", newline="") as f, open(os.path.join(run_dir, "eval_log.csv"), "w", newline="") as f_eval:
+        writer = csv.writer(f)
+        writer.writerow(["batch", "frames", "train_win_rate", "loss_objective", "loss_critic", "loss_entropy"])
+        writer_eval = csv.writer(f_eval)
+        writer_eval.writerow(["batch", "frames", "eval_win_rate"])
 
-        for _ in range(4):                      # epochs
-            for _ in range(4096 // 512):        # minibatches
-                mb = buffer.sample(512)
-                losses = loss_func(mb)
-                loss = losses["loss_objective"] + losses["loss_critic"] + losses["loss_entropy"]
-                optim.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(loss_func.parameters(), 0.5)
-                optim.step()
+        best_win_rate = 0.0
+        counter = 0
+        stop = False
 
-        if self_play and (i + 1) % snapshot_every == 0:
-            snapshot()
-            if len(pool) > pool_size:
-                pool.pop(0)
+        for i, batch in enumerate(collector):
+            with torch.no_grad():
+                gae(batch)
+            buffer.extend(batch.reshape(-1))
 
-        wins = batch["next", "reward"].sum()
-        games = batch["next", "done"].sum()
-        print(f"batch {i}: win rate {(wins / games).item():.3f}, loss {loss.item():.3f}")
+            for _ in range(epochs):                                    # epochs
+                for _ in range(batch_size // minibatch_size):          # minibatches
+                    mb = buffer.sample(minibatch_size)
+                    losses = loss_func(mb)
+                    loss = losses["loss_objective"] + losses["loss_critic"] + losses["loss_entropy"]
+                    optim.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(loss_func.parameters(), 0.5)
+                    optim.step()
 
-    torch.save(actor.state_dict(), "models/learner.pt")
+            if self_play and (i + 1) % snapshot_every == 0:
+                snapshot()
+                if len(pool) > pool_size:
+                    pool.pop(0)
+
+            if (i + 1) % checkpoint_every == 0:
+                torch.save(actor.state_dict(), os.path.join(run_dir, f"batch_{i + 1}.pt"))
+                eval_win_rate = evaluate(actor, [CluedoActor, RandomActor, GambleActor], games=eval_games, seed=eval_seed)
+                writer_eval.writerow([i, (i + 1) * batch_size, eval_win_rate])
+                f_eval.flush()
+                if eval_win_rate > best_win_rate + min_delta:
+                    best_win_rate = eval_win_rate
+                    counter = 0
+                    torch.save(actor.state_dict(), os.path.join(run_dir, "best.pt"))
+                else:
+                    counter += 1
+                    if counter >= patience:
+                        print(f"Early stopping triggered after {i + 1} batches due to no improvement in win rate.")
+                        stop = True
+
+            wins = batch["next", "reward"].sum()
+            games = batch["next", "done"].sum()
+            writer.writerow([i, (i + 1) * batch_size, (wins / games).item(), losses["loss_objective"].item(), losses["loss_critic"].item(), losses["loss_entropy"].item()])
+            f.flush()
+            print(f"batch {i}: win rate {(wins / games).item():.3f}, loss {loss.item():.3f}")
+            if stop:
+                break
+
+    torch.save(actor.state_dict(), os.path.join(run_dir, "final.pt"))
     return actor
 
 def evaluate(actor, opponent_factories, games=2000, seed=1):
