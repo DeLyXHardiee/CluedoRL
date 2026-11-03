@@ -1,5 +1,6 @@
 # Cluedo Actor Superclass
-from GameEngine import ActionTypes, Phase
+from GameEngine import ActionTypes, AFTER_SUGGEST
+import random
 
 UNKNOWN, YES, NO = 0, 1, 2
 
@@ -18,6 +19,7 @@ class CluedoActor():
         self.last_action = None
         self.knowledge = self.knowledge(seat, n, hand, public_cards)
         self.seed = seed
+        self.rng = random.Random(f"{seed}-{seat}")
     
     def observe(self, event):
         #print("Observing game state:", game_state)
