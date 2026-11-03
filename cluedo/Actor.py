@@ -6,9 +6,9 @@ UNKNOWN, YES, NO = 0, 1, 2
 
 class CluedoActor():
 
-    def __init__(self, strategy, knowledge=None):
+    def __init__(self, strategy, knowledge_class=None):
         self.strategy = strategy
-        self.knowledge = knowledge or Knowledge
+        self.knowledge_class = knowledge_class or Knowledge
 
     def reset(self, gameEngine, seat, n, hand, public_cards, seed):
         self.gameEngine = gameEngine
@@ -17,7 +17,7 @@ class CluedoActor():
         self.hand = hand
         self.public_cards = public_cards
         self.last_action = None
-        self.knowledge = self.knowledge(seat, n, hand, public_cards)
+        self.knowledge = self.knowledge_class(seat, n, hand, public_cards)
         self.seed = seed
         self.rng = random.Random(f"{seed}-{seat}")
     

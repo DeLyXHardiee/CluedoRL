@@ -313,7 +313,7 @@ def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, po
 
     snapshot()
 
-    opponent_factories = [CluedoActor(Strategy()), CluedoActor(Strategy("first", "certain")), CluedoActor(Strategy("first", "gamble"))]
+    opponent_factories = [CluedoActor(Strategy()), CluedoActor(Strategy(main_first, after_suggest_certain)), CluedoActor(Strategy(main_first, after_suggest_gamble))]
     if self_play:
         opponent_factories = [self_play_opponent]
 

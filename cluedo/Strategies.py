@@ -1,6 +1,3 @@
-import re
-
-from Actor import CluedoActor
 from GameEngine import ActionTypes, Phase
 import random
 
@@ -12,11 +9,11 @@ import random
 class Strategy:
     def __init__(
             self,
-            main: callable,
-            after_suggest: callable
+            main=None,
+            after_suggest=None
         ):
-        self.main = main
-        self.after_suggest = after_suggest
+        self.main = main or main_first
+        self.after_suggest = after_suggest or after_suggest_certain
 
     def getStrategy(self, game_state, knowledge, seed):
         phase = game_state["phase"]
