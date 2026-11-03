@@ -1,6 +1,0 @@
-# Dependencies for art_wrapper.py (excluding art-trainer)
-flask
-openai
-uvicorn
-pytest
-# Add other dependencies if needed
