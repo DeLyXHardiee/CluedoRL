@@ -13,7 +13,8 @@ from tensordict.nn import TensorDictModule
 from torchrl.modules import MLP, ProbabilisticActor, ValueOperator, MaskedCategorical
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
 from Actor import CluedoActor
-from Strategies import Strategy
+from functools import partial
+from Strategies import Strategy, main_first, after_suggest_certain, main_random, main_gamble, main_bluff, after_suggest_gamble
 
 class ClueEnv(EnvBase):
 
@@ -59,7 +60,7 @@ class ClueEnv(EnvBase):
             self.game = CluedoGameEngine(self.player_count, self.rng.getrandbits(32))
             self.seat = self.rng.randint(0, self.player_count - 1)
             #Should this actor have a strategy assigned?
-            self.actor = CluedoActor(Strategy("first", "certain"))
+            self.actor = CluedoActor(Strategy(main=main_first, after_suggest=after_suggest_certain))
             actors = []
             for i in range(self.player_count):
                 if i != self.seat:
@@ -183,7 +184,7 @@ def make_critic():
 
 def train(total_frames=3_000_000, seed=0):
     #I guess strategy here does nothing?
-    env = ClueEnv([lambda: CluedoActor(Strategy("first", "certain"))], seed=seed, player_count=4)
+    env = ClueEnv([lambda: CluedoActor(Strategy(main=main_first, after_suggest=after_suggest_certain))], seed=seed, player_count=4)
     actor = make_actor() 
     critic = make_critic()
 
@@ -239,6 +240,6 @@ def load_actor(path="learner.pt"):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "eval":
-        evaluate(load_actor(), [CluedoActor(Strategy("first", "certain"))])
+        evaluate(load_actor(), [lambda: CluedoActor(Strategy(main=partial(main_gamble, threshold=0.5), after_suggest=after_suggest_certain))])
     else:
         train()

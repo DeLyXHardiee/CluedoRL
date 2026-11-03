@@ -53,6 +53,7 @@ class Knowledge:
         self.one_of = []                # (answerer, set of cards) rules
         self.wrong_accusations = set()
         self.face_up = set(face_up)
+        self.hand = hand
 
         # Rule 1: face-up cards are NO for everyone; my row is fully known
         for card in face_up:
