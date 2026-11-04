@@ -80,7 +80,7 @@ def _cards_setup(knowledge):
     candidates = knowledge.candidates()
     suspects = [c for c in candidates if c < 6]
     weapons = [c for c in candidates if 6 <= c < 12]
-    rooms = [c for c in candidates if c >= 12]
+    rooms = [c for c in candidates if 21 > c >= 12]
     return suspects, weapons, rooms
 
 def after_suggest_certain(knowledge, seed):
