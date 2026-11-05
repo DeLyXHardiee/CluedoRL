@@ -255,7 +255,7 @@ def make_critic():
     net = MLP(in_features=283, out_features=1, num_cells=[256, 256])
     return ValueOperator(net, in_keys=["observation"])
 
-def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, pool_size=20, run_name="run", checkpoint_every=100, eval_games=2000, eval_seed=1000, patience=5, min_delta=0.01):
+def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size=20, run_name="run", checkpoint_every=100, eval_games=2000, eval_seed=1000, patience=5, min_delta=0.01):
     torch.manual_seed(seed)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     run_name = f"{run_name}_{timestamp}_{seed}"
@@ -272,7 +272,6 @@ def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, po
     epochs = 4
 
     config = {
-        "total_frames": total_frames,
         "seed": seed,
         "self_play": self_play,
         "snapshot_every": snapshot_every,
@@ -286,11 +285,11 @@ def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, po
         "lambda": lmbda,
         "batch_size": batch_size,
         "minibatch_size": minibatch_size,
-        "epochs": epochs
+        "epochs": epochs,
         "eval_games": eval_games,
         "eval_seed": eval_seed,
         "patience": patience,
-        "min_delta": min_delta
+        "min_delta": min_delta,
     }
 
     with open(os.path.join(run_dir, "config.json"), "w") as f:
@@ -321,7 +320,7 @@ def train(total_frames=3_000_000, seed=0, self_play=False, snapshot_every=50, po
     # Collector is responsible for gathering experience from the environment using the actor policy.
     # GAE (Generalized Advantage Estimation) is used to compute advantage estimates for policy gradient updates.
     # ClipPPOLoss implements the PPO objective with clipping to stabilize training.
-    collector = Collector(env, actor, frames_per_batch=batch_size, total_frames=total_frames)
+    collector = Collector(env, actor, frames_per_batch=batch_size, total_frames=max_frames or -1)
     gae = GAE(gamma=gamma, lmbda=lmbda, value_network=critic, average_gae=True)
     loss_func = ClipPPOLoss(actor, critic, clip_epsilon=clip, entropy_coeff=entropy)
     buffer = ReplayBuffer(storage=LazyTensorStorage(batch_size), sampler=SamplerWithoutReplacement())
@@ -406,6 +405,11 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "eval":
         evaluate(load_actor(), [CluedoActor, RandomActor, GambleActor])
     elif len(sys.argv) > 1 and sys.argv[1] == "self":
-        train(self_play=True)
+        if len(sys.argv) > 2:
+            train(max_frames=int(sys.argv[2]), self_play=True)
+        else:
+            train(self_play=True)
+    elif len(sys.argv) > 1 and sys.argv[1] not in ("eval", "self"):
+        train(max_frames=int(sys.argv[1]), self_play=True)
     else:
         train()
