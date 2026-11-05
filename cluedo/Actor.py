@@ -6,8 +6,9 @@ UNKNOWN, YES, NO = 0, 1, 2
 
 class CluedoActor():
 
-    def __init__(self):
-        pass
+    def __init__(self, strategy, knowledge_class=None):
+        self.strategy = strategy
+        self.knowledge_class = knowledge_class or Knowledge
 
     def reset(self, gameEngine, seat, n, hand, public_cards, seed):
         self.gameEngine = gameEngine
@@ -16,7 +17,7 @@ class CluedoActor():
         self.hand = hand
         self.public_cards = public_cards
         self.last_action = None
-        self.knowledge = Knowledge(seat, n, hand, public_cards)
+        self.knowledge = self.knowledge_class(seat, n, hand, public_cards)
         self.seed = seed
         self.rng = random.Random(f"{seed}-{seat}")
     
@@ -25,7 +26,7 @@ class CluedoActor():
         self.knowledge.observe(event)
     
     def act(self, game_state):
-        action = self.strategy(game_state)
+        action = self.strategy.getStrategy(game_state, self.knowledge, self.seed)
         #print("Acting with action:", action)
         self.last_action = action
         return action
@@ -35,19 +36,6 @@ class CluedoActor():
         for card in suggestion:
             if card in self.hand:
                 return card
-
-    # Default strategy, always suggest the first candidate cards and accuse only when certain
-    def strategy(self, game_state):
-        candidates = self.knowledge.candidates()
-        suspects = [c for c in candidates if c < 6]
-        weapons = [c for c in candidates if 6 <= c < 12]
-        rooms = [c for c in candidates if c >= 12]
-        guess = (suspects[0], weapons[0], rooms[0])
-        if len(suspects) == len(weapons) == len(rooms) == 1:
-            return (ActionTypes.ACCUSE, *guess)
-        if game_state["phase"] == AFTER_SUGGEST:
-            return (ActionTypes.END,)
-        return (ActionTypes.SUGGEST, *guess)
 
     def get_knowledge(self):
         return self.knowledge.table
@@ -68,6 +56,7 @@ class Knowledge:
         self.one_of = []                # (answerer, set of cards) rules
         self.wrong_accusations = set()
         self.face_up = set(face_up)
+        self.hand = hand
 
         # Rule 1: face-up cards are NO for everyone; my row is fully known
         for card in face_up:
@@ -153,3 +142,73 @@ class Knowledge:
                 for w in c if 6 <= w < 12
                 for r in c if r >= 12
                 if (s, w, r) not in self.wrong_accusations]
+
+class GullibleKnowledge(Knowledge):
+    # update player to NO on cards that they suggest unless they are already explicitly known to have them
+    def observe(self, event):
+        if event["kind"] == ActionTypes.SUGGEST:
+            for card in event["cards"]:
+                if self.table[event["seat"]][card] != YES:
+                    self.table[event["seat"]][card] = NO
+        super().observe(event)
+
+class GoodMemoryKnowledge(Knowledge):
+    # remember all turns that have been played to improve deduction
+    def __init__(self, *args, **kwargs):
+        self.history = []
+        super().__init__(*args, **kwargs)
+
+    def observe(self, event):
+        self.history.append(event)
+        super().observe(event)
+
+    def propagate(self):
+        while self.deduce_from_history() or self.apply_one_of() or self.apply_owner_and_full_hands(): 
+            pass
+
+    def deduce_from_history(self):
+        changed = False
+        for event in self.history:
+            if event["kind"] != ActionTypes.SUGGEST:
+                continue
+            answerer = event["answerer"]
+            if answerer is None or event["shown"] is not None:
+                continue
+            cards = event["cards"]
+            if any(self.table[answerer][card] == YES for card in cards):
+                continue
+            possible_cards = [
+                card for card in cards
+                if self.table[answerer][card] != NO
+                and not any(
+                    self.table[seat][card] == YES
+                    for seat in range(self.n)
+                    if seat != answerer
+                )
+            ]
+            if len(possible_cards) == 1:
+                #print(f"Deduced card {possible_cards[0]} for player {answerer} from history event {event} at turn {len(self.history)}")
+                #self.printTable()
+                self.table[answerer][possible_cards[0]] = YES
+                changed = True
+        return changed
+
+    # print a pretty representation of the knowledge table
+    def printTable(self):
+        for seat in range(self.n):
+            if seat == 0:
+                print("          ", end="")
+                for card in range(len(self.table[seat])):
+                    print(f"{card:2}  ", end=" ")
+                print()
+            for card in range(len(self.table[seat])):
+                val = self.table[seat][card]
+                if card == 0:
+                    print(f"Player {seat}: ", end="")
+                if val == YES:
+                    print("Y   ", end=" ")
+                elif val == NO:
+                    print("N   ", end=" ")
+                else:
+                    print("-   ", end=" ")
+            print()

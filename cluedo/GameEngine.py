@@ -118,6 +118,7 @@ class CluedoGameEngine:
         if self.turns_taken >= self.max_turns:
             self.done = True
             self.truncated = True
+            #self.printToFile()
 
     # Execute a single game step based on the player's action.
     def step(self, action):
@@ -151,6 +152,7 @@ class CluedoGameEngine:
             if correct:
                 self.winner = player
                 self.done = True
+                #self.printToFile()
             else:
                 self.eliminated_players.append(player)
                 if len(self.eliminated_players) == len(self.players):
@@ -214,10 +216,12 @@ class CluedoGameEngine:
                 view["shown"] = None
             player.observe(view)
 
-    def printToFile(self, turns):
+    def printToFile(self):
         with open("turns_log.txt", "a") as f:
             f.write("New game: " + str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")) + "\n")
             f.write("Solution: " + str(self.envelope) + "\n")
+            for player in self.players:
+                f.write(f"Player {player.seat} hand: {self.hands[player]}\n")
             f.write("Format: turn_number, player_seat, action, (revealed_card, revealed_by)\n")
-            for turn in turns:
+            for turn in self.turns:
                 f.write(str(turn) + "\n")

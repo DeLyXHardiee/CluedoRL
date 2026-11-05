@@ -16,8 +16,9 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.modules import MLP, ProbabilisticActor, ValueOperator, MaskedCategorical
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
-from Actor import CluedoActor
-from Strategies import RandomActor, GambleActor
+from Actor import CluedoActor, Knowledge, GullibleKnowledge
+from functools import partial
+from Strategies import Strategy, main_first, after_suggest_certain, main_random, main_gamble, main_bluff, after_suggest_gamble
 
 def build_actions():
     # lookup table
@@ -68,11 +69,12 @@ class ClueEnv(EnvBase):
         while True:
             self.game = CluedoGameEngine(self.player_count, self.rng.getrandbits(32))
             self.seat = self.rng.randint(0, self.player_count - 1)
-            self.actor = CluedoActor()
+            #Should this actor have a strategy assigned?
+            self.actor = CluedoActor(Strategy(main=main_first, after_suggest=after_suggest_certain))
             actors = []
             for i in range(self.player_count):
                 if i != self.seat:
-                    opponent = self.rng.choice(self.opponent_factories)()
+                    opponent = self.rng.choice(self.opponent_factories)
                     actors.append(opponent)
                     continue
                 actors.append(self.actor)
@@ -310,7 +312,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
 
     snapshot()
 
-    opponent_factories = [CluedoActor, RandomActor, GambleActor]
+    opponent_factories = [CluedoActor(Strategy()), CluedoActor(Strategy(main_first, after_suggest_certain)), CluedoActor(Strategy(main_first, after_suggest_gamble))]
     if self_play:
         opponent_factories = [self_play_opponent]
 
@@ -358,7 +360,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
 
             if (i + 1) % checkpoint_every == 0:
                 torch.save(actor.state_dict(), os.path.join(run_dir, f"batch_{i + 1}.pt"))
-                eval_win_rate = evaluate(actor, [CluedoActor, RandomActor, GambleActor], games=eval_games, seed=eval_seed)
+                eval_win_rate = evaluate(actor, [CluedoActor, CluedoActor(Strategy("random", "certain")), CluedoActor(Strategy("first", "gamble"))], games=eval_games, seed=eval_seed)
                 writer_eval.writerow([i, (i + 1) * batch_size, eval_win_rate])
                 f_eval.flush()
                 if eval_win_rate > best_win_rate + min_delta:
@@ -403,7 +405,7 @@ def load_actor(path="models/learner.pt"):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "eval":
-        evaluate(load_actor(), [CluedoActor, RandomActor, GambleActor])
+        evaluate(load_actor(), [lambda: CluedoActor(Strategy(main=partial(main_gamble, threshold=0.5), after_suggest=after_suggest_certain, knowledge=GullibleKnowledge))])
     elif len(sys.argv) > 1 and sys.argv[1] == "self":
         if len(sys.argv) > 2:
             train(max_frames=int(sys.argv[2]), self_play=True)
