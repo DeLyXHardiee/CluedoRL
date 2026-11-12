@@ -152,6 +152,15 @@ class GullibleKnowledge(Knowledge):
                     self.table[event["seat"]][card] = NO
         super().observe(event)
 
+    # False beliefs can mark every card in a category as held. Since the envelope
+    # always holds one, fall back to every card in that category we can't see.
+    def candidates(self):
+        result = super().candidates()
+        for lo, hi in ((0, 6), (6, 12), (12, 21)):
+            if not any(lo <= c < hi for c in result):
+                result += [c for c in range(lo, hi) if c not in self.face_up and c not in self.hand]
+        return result
+
 class GoodMemoryKnowledge(Knowledge):
     # remember all turns that have been played to improve deduction
     def __init__(self, *args, **kwargs):
