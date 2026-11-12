@@ -5,6 +5,8 @@ import os
 import csv
 import json
 import time
+import argparse
+import subprocess
 from torchrl.envs import EnvBase
 from torchrl.envs.utils import set_exploration_type, ExplorationType
 from torchrl.data import Composite, Unbounded, Binary, Categorical, ReplayBuffer, LazyTensorStorage
@@ -356,7 +358,9 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
             "train": train,
             "val": [bot for bot in VAL_POOL],
             "test": [bot for bot in TEST_POOL]
-        }
+        },
+        "git_hash": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__))).stdout.strip(),
+        "git_dirty": subprocess.run(["git", "diff", "HEAD", "--quiet"], capture_output=True, cwd=os.path.dirname(os.path.abspath(__file__))).returncode != 0
     }
 
     with open(os.path.join(run_dir, "config.json"), "w") as f:
@@ -481,14 +485,16 @@ def load_actor(path="checkpoints/path_to_model.pt"):
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) > 1 and sys.argv[1] == "eval":
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("mode", type=str, help="Mode to run: train or eval", choices=["train", "eval"])
+    argparser.add_argument("--method", type=str, default="bots", help="Method to run: bots or self play", choices=["bots", "self"])
+    argparser.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility")
+    argparser.add_argument("--max_frames", type=int, default=None, help="Maximum number of frames to train for")
+    args = argparser.parse_args()
+    
+    if args.mode == "train":
+        train(max_frames=args.max_frames, run_name=f"{args.method}_run", seed=args.seed, self_play=(args.method == "self"))
+    elif args.mode == "eval":
         evaluate(load_actor(), TEST_POOL)
-    elif len(sys.argv) > 1 and sys.argv[1] == "self":
-        if len(sys.argv) > 2:
-            train(max_frames=int(sys.argv[2]), self_play=True)
-        else:
-            train(self_play=True)
-    elif len(sys.argv) > 1 and sys.argv[1] not in ("eval", "self"):
-        train(max_frames=int(sys.argv[1]))
     else:
-        train()
+        argparser.print_help()
