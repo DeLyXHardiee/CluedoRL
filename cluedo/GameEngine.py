@@ -176,7 +176,10 @@ class CluedoGameEngine:
 
     def play(self, stop_at=None):
         while not self.done and self.current_turn != stop_at:
-            player = self.seatToPlayer[self.current_turn]
+            player = self.players[self.current_turn]
+            if player in self.eliminated_players:
+                self.next_turn()
+                continue
             action = player.act({**self.publicGameState, "phase": self.phase})
             self.step(action)
 
