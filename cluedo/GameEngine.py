@@ -30,10 +30,11 @@ class CluedoGameEngine:
         self.seed = seed
         self.max_turns = 200
         self.players = []
-        self.seats = {}
-        self.turn_order = []
+        self.playerToSeat = {}
+        self.seatToPlayer = {}
         self.envelope = None
         self.current_turn = 0
+        self.turns_taken = 0
         self.playerLimit = 6
         self.hands = {}
         self.eliminated_players = []
@@ -65,15 +66,8 @@ class CluedoGameEngine:
     def start_game(self):
         #print("Starting game with players:", [self.players.index(player) for player in self.players])
         # Initialize the game, deal cards, and set up the envelope
-        self.current_turn = 0
-        self.turns_taken = 0
-        self.eliminated_players = []
-        self.winner = None
-        self.done = False
-        self.truncated = False
-        self.phase = MAIN
-        self.turns = []
-        self.hands = {}
+        self.n_players = len(self.players)
+        # step in rng so next game is new
         self.rng = random.Random(self.seed)
 
         self.setup_envelope_and_deal_cards()
@@ -111,23 +105,22 @@ class CluedoGameEngine:
             self.hands[player].append(card)
         randomOrderPlayers = list(self.players)
         self.rng.shuffle(randomOrderPlayers)
-        self.turn_order = randomOrderPlayers
-        self.seats = {}
         for seat, player in enumerate(randomOrderPlayers):
-            self.seats[player] = seat
+            self.playerToSeat[player] = seat
+            self.seatToPlayer[seat] = player
             player.reset(self, seat, len(self.players), self.hands[player], self.publicCards, self.seed)
 
     def get_game_dict(self):
         return {
             "current_turn": self.current_turn,
             "turns_taken": self.turns_taken,
-            "eliminated_players": [self.seats[player] for player in self.eliminated_players],
-            "winner": self.seats[self.winner] if self.winner else None,
+            "eliminated_players": self.eliminated_players,
+            "winner": self.winner if self.winner else None,
             "done": self.done,
             "truncated": self.truncated,
             "phase": self.phase,
             "turns": self.turns,
-            "hands": {self.seats[player]: hand for player, hand in self.hands.items()},
+            "hands": {self.playerToSeat[player]: hand for player, hand in self.hands.items()},
             "public_cards": self.publicCards,
             "seed": self.seed
         }
@@ -143,8 +136,8 @@ class CluedoGameEngine:
 
     # Execute a single game step based on the player's action.
     def step(self, action):
-        player = self.turn_order[self.current_turn]
-        self.turns.append((self.turns_taken, self.seats[player], action))
+        player = self.seatToPlayer[self.current_turn]
+        self.turns.append((self.turns_taken, self.playerToSeat[player], action))
         # Skip the turn if the player is eliminated, the action is invalid, or the action is to end the turn.
         if player in self.eliminated_players or not self.validateAction(action) or action[0] == ActionTypes.END:
             self.next_turn()
@@ -153,12 +146,12 @@ class CluedoGameEngine:
             suggestion = action[1:]
             revealed_card, revealed_by, passed = self.suggestLoop(player, suggestion)
             #print(f"Suggestion made by {player.seat}: {suggestion}, revealed card: {revealed_card}, revealed by: {revealed_by.seat if revealed_by else revealed_by}")
-            self.turns[-1] = (self.turns_taken, self.seats[player], action, (revealed_card, self.seats[revealed_by] if revealed_by else revealed_by))
+            self.turns[-1] = (self.turns_taken, self.playerToSeat[player], action, (revealed_card, self.playerToSeat[revealed_by] if revealed_by else revealed_by))
             self.phase = AFTER_SUGGEST
             self.broadcastEvent({
-                "turn": self.turns_taken,                 "kind": SUGGEST, "seat": self.seats[player],
+                "turn": self.turns_taken,                 "kind": SUGGEST, "seat": self.playerToSeat[player],
                 "cards": tuple(suggestion), "passed": passed,
-                                "answerer": self.seats[revealed_by] if revealed_by else None,
+                                "answerer": self.playerToSeat[revealed_by] if revealed_by else None,
                 "shown": revealed_card, "correct": None,
             })
             return
@@ -166,7 +159,7 @@ class CluedoGameEngine:
             accusation = action[1:]
             correct = self.accuse(accusation)
             self.broadcastEvent({
-                "turn": self.turns_taken, "kind": ACCUSE, "seat": self.seats[player],
+                "turn": self.turns_taken, "kind": ACCUSE, "seat": self.playerToSeat[player],
                 "cards": tuple(accusation), "passed": [], "answerer": None,
                 "shown": None, "correct": correct,
             })
@@ -176,29 +169,29 @@ class CluedoGameEngine:
                 self.printToFile()
             else:
                 self.eliminated_players.append(player)
-                if len(self.eliminated_players) == len(self.players):
+                if len(self.eliminated_players) == self.n_players:
                     self.done = True
                 self.next_turn()
             return
 
     def play(self, stop_at=None):
         while not self.done and self.current_turn != stop_at:
-            player = self.turn_order[self.current_turn]
+            player = self.seatToPlayer[self.current_turn]
             action = player.act({**self.publicGameState, "phase": self.phase})
             self.step(action)
 
     # Determines which player should reveal and calls their own reveal strategy
     def suggestLoop(self, player, suggestion):
         passed = []
-        for i in range(1, len(self.turn_order)):
-            next_player = self.turn_order[(self.current_turn + i) % len(self.turn_order)]
+        for i in range(1, self.n_players):
+            next_player = self.seatToPlayer[(self.current_turn + i) % self.n_players]
             matching = [card for card in suggestion if card in self.hands[next_player]]
             if matching:
                 revealed = next_player.choose_reveal(matching, player)
                 if revealed not in matching:
                     revealed = matching[0]
                 return revealed, next_player, passed
-            passed.append(self.seats[next_player])
+            passed.append(self.playerToSeat[next_player])
         return None, None, passed
 
     def accuse(self,accusation):
@@ -233,7 +226,7 @@ class CluedoGameEngine:
     def broadcastEvent(self, event):
         for player in self.players:
             view = dict(event)
-            if self.seats[player] not in (event["seat"], event["answerer"]):
+            if self.playerToSeat[player] not in (event["seat"], event["answerer"]):
                 view["shown"] = None
             player.observe(view)
 
@@ -241,8 +234,8 @@ class CluedoGameEngine:
         with open("turns_log.txt", "a") as f:
             f.write("New game: " + str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")) + "\n")
             f.write("Solution: " + str(self.envelope) + "\n")
-            for player in self.turn_order:
-                f.write(f"Player {self.seats[player]} hand: {self.hands[player]}\n")
+            for player in self.players:
+                f.write(f"Player {self.playerToSeat[player]} hand: {self.hands[player]}\n")
             f.write("Format: turn_number, player_seat, action, (revealed_card, revealed_by)\n")
             for turn in self.turns:
                 f.write(str(turn) + "\n")

@@ -42,7 +42,7 @@ def main_random(knowledge, seed):
         return (ActionTypes.ACCUSE, *guess)
     return (ActionTypes.SUGGEST, *guess)
 
-def main_gamble(knowledge, seed, threshold=1):
+def main_gamble(knowledge, seed, threshold=2):
     suspects,weapons,rooms = _cards_setup(knowledge)
     rng = random.Random(seed)
     s = rng.randrange(len(suspects))
@@ -51,7 +51,7 @@ def main_gamble(knowledge, seed, threshold=1):
     guess = (suspects[s], weapons[w], rooms[r])
 
     accusation_candidates = knowledge.accusation_candidates()
-    if len(accusation_candidates) <= threshold:
+    if len(accusation_candidates) <= threshold and len(accusation_candidates) > 0:
         rnd = rng.randrange(len(accusation_candidates))
         guess = accusation_candidates[rnd]
         return (ActionTypes.ACCUSE, *guess)
@@ -90,7 +90,7 @@ def after_suggest_certain(knowledge, seed):
         return (ActionTypes.ACCUSE, *guess)
     return (ActionTypes.END,)
 
-def after_suggest_gamble(knowledge, seed, threshold=1):
+def after_suggest_gamble(knowledge, seed, threshold=2):
     suspects,weapons,rooms = _cards_setup(knowledge)
     rng = random.Random(seed)
     s = rng.randrange(len(suspects))
@@ -99,7 +99,7 @@ def after_suggest_gamble(knowledge, seed, threshold=1):
     guess = (suspects[s], weapons[w], rooms[r])
 
     accusation_candidates = knowledge.accusation_candidates()
-    if len(accusation_candidates) <= threshold:
+    if len(accusation_candidates) <= threshold and len(accusation_candidates) > 0:
         rnd = rng.randrange(len(accusation_candidates))
         guess = accusation_candidates[rnd]
         return (ActionTypes.ACCUSE, *guess)
