@@ -10,7 +10,7 @@ knowledges = [Knowledge, GullibleKnowledge, GoodMemoryKnowledge]
 
 nbots = 6
 wins = [0] * nbots
-games = 10000
+games = 1000
 
 for i in range(games):
     bots = [
@@ -23,7 +23,7 @@ for i in range(games):
     ]
     slot = {id(bot): idx for idx, bot in enumerate(bots)}
     shuffle(bots)
-    game = CluedoGameEngine(len(bots), randint(0, 1000000))
+    game = CluedoGameEngine(randint(0, 1000000))
     game.start(bots)
     game.play()
     if game.winner is not None:
