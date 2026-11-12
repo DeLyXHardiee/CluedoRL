@@ -84,8 +84,7 @@ class ClueEnv(EnvBase):
 
     def _reset(self, tensordict=None):
         while True:
-            self.player_count = self.rng.choice(self.player_counts)
-            self.game = CluedoGameEngine(self.player_count, self.rng.getrandbits(32))
+            self.game = CluedoGameEngine(self.rng.getrandbits(32))
             self.seat = self.rng.randint(0, self.player_count - 1)
             #Should this actor have a strategy assigned?
             self.actor = CluedoActor(Strategy(main=main_first, after_suggest=after_suggest_certain))
