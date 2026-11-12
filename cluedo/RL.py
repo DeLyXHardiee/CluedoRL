@@ -16,9 +16,26 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.modules import MLP, ProbabilisticActor, ValueOperator, MaskedCategorical
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
-from Actor import CluedoActor, Knowledge, GullibleKnowledge
+from Actor import CluedoActor, Knowledge, GullibleKnowledge, GoodMemoryKnowledge
 from functools import partial
 from Strategies import Strategy, main_first, after_suggest_certain, main_random, main_gamble, main_bluff, after_suggest_gamble
+
+MAX_PLAYERS = 6
+OBS_SIZE = MAX_PLAYERS * 21 * 3 + 21 + 4 + MAX_PLAYERS + MAX_PLAYERS + 2 # 417
+
+def bot(main=main_first, after_suggest=after_suggest_certain, knowledge=Knowledge):
+      return lambda: CluedoActor(Strategy(main, after_suggest), knowledge)
+
+TRAIN_OPPONENTS = [
+    bot(),
+    bot(main_random),
+    bot(main_gamble, after_suggest_gamble),
+    bot(main_bluff),
+    bot(knowledge=GullibleKnowledge),
+]
+EVAL_OPPONENTS = [
+    bot(knowledge=GoodMemoryKnowledge),
+]
 
 def build_actions():
     # lookup table
@@ -37,10 +54,10 @@ COMBINATION_COUNT = 6 * 6 * 9 # suspects * weapons * rooms
 
 class ClueEnv(EnvBase):
 
-    def __init__(self, opponent_factories, seed, player_count):
+    def __init__(self, opponent_factories, seed, player_counts=(3, 4, 5, 6)):
         super().__init__()
         self.opponent_factories = opponent_factories
-        self.player_count = player_count
+        self.player_counts = player_counts
 
         self.actions = ACTIONS
 
@@ -48,7 +65,7 @@ class ClueEnv(EnvBase):
         self.action_to_index = ACTION_TO_INDEX
 
         self.observation_spec = Composite(
-            observation=Unbounded(shape=(283,), dtype=torch.float32),
+            observation=Unbounded(shape=(OBS_SIZE,), dtype=torch.float32),
             action_mask=Binary(shape=(649,), dtype=torch.bool),
             shape=(),
         )
@@ -67,6 +84,7 @@ class ClueEnv(EnvBase):
 
     def _reset(self, tensordict=None):
         while True:
+            self.player_count = self.rng.choice(self.player_counts)
             self.game = CluedoGameEngine(self.player_count, self.rng.getrandbits(32))
             self.seat = self.rng.randint(0, self.player_count - 1)
             #Should this actor have a strategy assigned?
@@ -74,8 +92,7 @@ class ClueEnv(EnvBase):
             actors = []
             for i in range(self.player_count):
                 if i != self.seat:
-                    opponent = self.rng.choice(self.opponent_factories)
-                    actors.append(opponent)
+                    actors.append(self.rng.choice(self.opponent_factories)())
                     continue
                 actors.append(self.actor)
 
@@ -127,7 +144,7 @@ class FactoredPolicy(torch.nn.Module):
     
     def __init__(self):
         super().__init__()
-        self.body = MLP(in_features=283, out_features=45, num_cells=[256, 256])
+        self.body = MLP(in_features=OBS_SIZE, out_features=45, num_cells=[256, 256])
         self.actions = build_actions()
         kind_idx = []
         s_idx = []
@@ -169,11 +186,13 @@ class FactoredPolicy(torch.nn.Module):
 def build_observation(actor):
     game = actor.gameEngine
     accusation_candidates = actor.get_accusation_candidates()
+    n = len(game.players)
 
     # Notepad grid
     knowledge = torch.tensor(actor.get_knowledge(), dtype=torch.int64)
     grid = torch.roll(knowledge, shifts=-actor.seat, dims=0)
     grid = torch.nn.functional.one_hot(grid, num_classes=3)
+    grid = torch.nn.functional.pad(grid, (0, 0, 0, 0, 0, MAX_PLAYERS - n), value=0) # pad to max players
     grid = grid.flatten().float()
     
     # Envelope candidates
@@ -193,16 +212,20 @@ def build_observation(actor):
     solve[3] = 1.0 / max(len(accusation_candidates), 1) # how many candidates remain in total, computed so 1.0 when solved, 0.5 at two left, 0.33 at three etc.
 
     # Game state
-    state = torch.zeros(6, dtype=torch.float32)
-    eliminated = torch.tensor([p in game.eliminated_players for p in game.players], dtype=torch.float32)
-    eliminated = torch.roll(eliminated, shifts=-actor.seat, dims=0)
-    for i in range(len(eliminated)):
-        if eliminated[i]:
-            state[i] = 1.0
-    state[4] = 1.0 if game.phase == AFTER_SUGGEST else 0.0
-    state[5] = game.turns_taken / game.max_turns
+    eliminated = torch.zeros(MAX_PLAYERS, dtype=torch.float32)
+    eliminated_players = torch.tensor([p in game.eliminated_players for p in game.players], dtype=torch.float32)
+    eliminated_players = torch.roll(eliminated_players, shifts=-actor.seat, dims=0)
+    for i in range(len(eliminated_players)):
+        if eliminated_players[i]:
+            eliminated[i] = 1.0
+    present_players = torch.zeros(MAX_PLAYERS, dtype=torch.float32)
+    present_players[:n] = 1.0
+    misc = torch.zeros(2, dtype=torch.float32)
+    misc[0] = 1.0 if game.phase == AFTER_SUGGEST else 0.0
+    misc[1] = game.turns_taken / game.max_turns
 
-    encoded = torch.cat([grid, cand, solve, state], dim=0)
+    encoded = torch.cat([grid, cand, solve, eliminated, present_players, misc], dim=0)
+    assert encoded.shape[0] == OBS_SIZE, f"Observation size mismatch: expected {OBS_SIZE}, got {encoded.shape[0]}"
     return encoded
 
 def build_action_mask(actor):
@@ -228,10 +251,10 @@ def build_action_mask(actor):
 class RLActor(CluedoActor):
 
     def __init__(self, policy):
-        super().__init__()
+        super().__init__(strategy=self)
         self.policy = policy
 
-    def strategy(self, game_state):
+    def getStrategy(self, game_state, knowledge, seed):
         tensordict = TensorDict({
             "observation": build_observation(self),
             "action_mask": build_action_mask(self),
@@ -254,10 +277,10 @@ def make_actor():
       )
 
 def make_critic():
-    net = MLP(in_features=283, out_features=1, num_cells=[256, 256])
+    net = MLP(in_features=OBS_SIZE, out_features=1, num_cells=[256, 256])
     return ValueOperator(net, in_keys=["observation"])
 
-def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size=20, run_name="run", checkpoint_every=100, eval_games=2000, eval_seed=1000, patience=5, min_delta=0.01):
+def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size=20, run_name="run", checkpoint_every=100, eval_games=2000, eval_seed=1000, patience=5, min_delta=0.04, player_counts=(3, 4, 5, 6)):
     torch.manual_seed(seed)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     run_name = f"{run_name}_{timestamp}_{seed}"
@@ -292,6 +315,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
         "eval_seed": eval_seed,
         "patience": patience,
         "min_delta": min_delta,
+        "player_counts": player_counts
     }
 
     with open(os.path.join(run_dir, "config.json"), "w") as f:
@@ -312,11 +336,11 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
 
     snapshot()
 
-    opponent_factories = [CluedoActor(Strategy()), CluedoActor(Strategy(main_first, after_suggest_certain)), CluedoActor(Strategy(main_first, after_suggest_gamble))]
+    opponent_factories = TRAIN_OPPONENTS
     if self_play:
         opponent_factories = [self_play_opponent]
 
-    env = ClueEnv(opponent_factories, seed=seed, player_count=4)
+    env = ClueEnv(opponent_factories, seed=seed, player_counts=player_counts)
     critic = make_critic()
 
     # Collector is responsible for gathering experience from the environment using the actor policy.
@@ -332,9 +356,9 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
         writer = csv.writer(f)
         writer.writerow(["batch", "frames", "train_win_rate", "loss_objective", "loss_critic", "loss_entropy"])
         writer_eval = csv.writer(f_eval)
-        writer_eval.writerow(["batch", "frames", "eval_win_rate"])
+        writer_eval.writerow(["batch", "frames", "eval_combined_score"] + [f"eval_player_count_{player_count}_win_rate" for player_count in player_counts])
 
-        best_win_rate = 0.0
+        best_score = 0.0
         counter = 0
         stop = False
 
@@ -360,17 +384,17 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
 
             if (i + 1) % checkpoint_every == 0:
                 torch.save(actor.state_dict(), os.path.join(run_dir, f"batch_{i + 1}.pt"))
-                eval_win_rate = evaluate(actor, [CluedoActor, CluedoActor(Strategy("random", "certain")), CluedoActor(Strategy("first", "gamble"))], games=eval_games, seed=eval_seed)
-                writer_eval.writerow([i, (i + 1) * batch_size, eval_win_rate])
+                eval_dict = evaluate(actor, TRAIN_OPPONENTS, games=eval_games, seed=eval_seed, player_counts=player_counts)
+                writer_eval.writerow([i, (i + 1) * batch_size, eval_dict["combined"]] + [eval_dict[player] for player in player_counts])
                 f_eval.flush()
-                if eval_win_rate > best_win_rate + min_delta:
-                    best_win_rate = eval_win_rate
+                if eval_dict["combined"] > best_score + min_delta:
+                    best_score = eval_dict["combined"]
                     counter = 0
                     torch.save(actor.state_dict(), os.path.join(run_dir, "best.pt"))
                 else:
                     counter += 1
                     if counter >= patience:
-                        print(f"Early stopping triggered after {i + 1} batches due to no improvement in win rate.")
+                        print(f"Early stopping triggered after {i + 1} batches due to no improvement in score.")
                         stop = True
 
             wins = batch["next", "reward"].sum()
@@ -384,20 +408,31 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
     torch.save(actor.state_dict(), os.path.join(run_dir, "final.pt"))
     return actor
 
-def evaluate(actor, opponent_factories, games=2000, seed=1):
-    env = ClueEnv(opponent_factories, seed=seed, player_count=4)
-    wins = 0
-    with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
-        for _ in range(games):
-            td = env.rollout(1000, policy=actor)
-            wins += int(td["next", "reward"].sum().item() > 0)
-    p = wins / games
-    # Compute the 95% confidence interval for the win rate.
-    half = 1.96 * math.sqrt(p * (1 - p) / games)
-    print(f"win rate {p:.3f} ± {half:.3f} over {games} games")
-    return p
+def evaluate(actor, opponent_factories, games=2000, seed=1, player_counts=(3, 4, 5, 6)):
+    win_rates = {}
 
-def load_actor(path="models/learner.pt"):
+    for player_count in player_counts:
+        env = ClueEnv(opponent_factories, seed=seed, player_counts=(player_count,))
+        wins = 0
+        with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
+            for _ in range(games):
+                td = env.rollout(1000, policy=actor)
+                wins += int(td["next", "reward"].sum().item() > 0)
+        p_internal = wins / games
+        # Compute the 95% confidence interval for the win rate.
+        half_internal = 1.96 * math.sqrt(p_internal * (1 - p_internal) / games)
+        print(f"player count {player_count}: win rate {p_internal:.3f} ± {half_internal:.3f} over {games} games")
+        win_rates[player_count] = p_internal
+
+    p = []
+    for player_count in player_counts:
+        p.append(win_rates[player_count] * player_count)
+    combined_score = sum(p) / len(p)
+    print(f"combined score across player counts {combined_score:.3f}")
+    win_rates["combined"] = combined_score
+    return win_rates
+
+def load_actor(path="checkpoints/path_to_model.pt"):
     actor = make_actor()
     actor.load_state_dict(torch.load(path))
     return actor
@@ -405,13 +440,13 @@ def load_actor(path="models/learner.pt"):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "eval":
-        evaluate(load_actor(), [lambda: CluedoActor(Strategy(main=partial(main_gamble, threshold=0.5), after_suggest=after_suggest_certain, knowledge=GullibleKnowledge))])
+        evaluate(load_actor(), TRAIN_OPPONENTS)
     elif len(sys.argv) > 1 and sys.argv[1] == "self":
         if len(sys.argv) > 2:
             train(max_frames=int(sys.argv[2]), self_play=True)
         else:
             train(self_play=True)
     elif len(sys.argv) > 1 and sys.argv[1] not in ("eval", "self"):
-        train(max_frames=int(sys.argv[1]), self_play=True)
+        train(max_frames=int(sys.argv[1]))
     else:
         train()
