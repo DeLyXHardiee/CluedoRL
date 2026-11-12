@@ -26,7 +26,7 @@ class CluedoActor():
         self.knowledge.observe(event)
     
     def act(self, game_state):
-        action = self.strategy.getStrategy(game_state, self.knowledge, self.seed)
+        action = self.strategy.getStrategy(game_state, self.knowledge, self.rng)
         #print("Acting with action:", action)
         self.last_action = action
         return action
@@ -46,6 +46,9 @@ class CluedoActor():
     def get_accusation_candidates(self):
         return self.knowledge.accusation_candidates()
 
+    def get_suggestion_counts(self):
+        return self.knowledge.suggested
+
 # Knowledge representation for Cluedo game, tracking known and possible card ownerships
 class Knowledge:
     def __init__(self, seat, n, hand, face_up):
@@ -53,6 +56,7 @@ class Knowledge:
         self.n = n
         self.hand_size = 18 // n
         self.table = [[UNKNOWN] * 21 for _ in range(n)]
+        self.suggested = [[0] * 21 for _ in range(n)]
         self.one_of = []                # (answerer, set of cards) rules
         self.wrong_accusations = set()
         self.face_up = set(face_up)
@@ -98,6 +102,9 @@ class Knowledge:
             # Rule 4: someone else answered, so they hold at least one of the three
             elif event["answerer"] is not None:
                 self.one_of.append((event["answerer"], set(event["cards"])))
+            # Update the suggested table
+            for card in event["cards"]:
+                self.suggested[event["seat"]][card] += 1
         elif event["kind"] == ActionTypes.ACCUSE and not event["correct"]:
             self.wrong_accusations.add(tuple(event["cards"]))
         self.propagate()

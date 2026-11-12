@@ -21,7 +21,7 @@ from functools import partial
 from Strategies import Strategy, main_first, after_suggest_certain, main_random, main_gamble, main_bluff, after_suggest_gamble
 
 MAX_PLAYERS = 6
-OBS_SIZE = MAX_PLAYERS * 21 * 3 + 21 + 4 + MAX_PLAYERS + MAX_PLAYERS + 2 # 417
+OBS_SIZE = MAX_PLAYERS * 21 * 3 + 21 + 4 + MAX_PLAYERS + MAX_PLAYERS + 2 + MAX_PLAYERS * 21 # 543
 
 def bot(main=main_first, after_suggest=after_suggest_certain, knowledge=Knowledge):
       return lambda: CluedoActor(Strategy(main, after_suggest), knowledge)
@@ -194,6 +194,13 @@ def build_observation(actor):
     grid = torch.nn.functional.one_hot(grid, num_classes=3)
     grid = torch.nn.functional.pad(grid, (0, 0, 0, 0, 0, MAX_PLAYERS - n), value=0) # pad to max players
     grid = grid.flatten().float()
+
+    # Suggestion history grid
+    suggested = torch.tensor(actor.get_suggestion_counts(), dtype=torch.float32)
+    suggested = torch.roll(suggested, shifts=-actor.seat, dims=0)
+    suggested = suggested / (suggested + 1) # 0 stays 0, 1 becomes 0.5, 2 becomes 0.66, 3 becomes 0.75 etc.
+    suggested = torch.nn.functional.pad(suggested, (0, 0, 0, MAX_PLAYERS - n), value=0)
+    suggested = suggested.flatten()
     
     # Envelope candidates
     candidates = actor.get_candidates()
@@ -224,7 +231,7 @@ def build_observation(actor):
     misc[0] = 1.0 if game.phase == AFTER_SUGGEST else 0.0
     misc[1] = game.turns_taken / game.max_turns
 
-    encoded = torch.cat([grid, cand, solve, eliminated, present_players, misc], dim=0)
+    encoded = torch.cat([grid, suggested, cand, solve, eliminated, present_players, misc], dim=0)
     assert encoded.shape[0] == OBS_SIZE, f"Observation size mismatch: expected {OBS_SIZE}, got {encoded.shape[0]}"
     return encoded
 

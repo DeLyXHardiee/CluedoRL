@@ -15,25 +15,24 @@ class Strategy:
         self.main = main or main_first
         self.after_suggest = after_suggest or after_suggest_certain
 
-    def getStrategy(self, game_state, knowledge, seed):
+    def getStrategy(self, game_state, knowledge, rng):
         phase = game_state["phase"]
         if phase == Phase.MAIN:
-            return self.main(knowledge, seed)
+            return self.main(knowledge, rng)
         elif phase == Phase.AFTER_SUGGEST:
-            return self.after_suggest(knowledge, seed)
+            return self.after_suggest(knowledge, rng)
         else:
             raise ValueError(f"Unknown phase: {phase}")
         
-def main_first(knowledge, seed):
+def main_first(knowledge, rng):
     suspects,weapons,rooms = _cards_setup(knowledge)
     guess = (suspects[0], weapons[0], rooms[0])
     if len(suspects) == len(weapons) == len(rooms) == 1:
         return (ActionTypes.ACCUSE, *guess)
     return (ActionTypes.SUGGEST, *guess)
 
-def main_random(knowledge, seed):
+def main_random(knowledge, rng):
     suspects,weapons,rooms = _cards_setup(knowledge)
-    rng = random.Random(seed)
     s = rng.randrange(len(suspects))
     w = rng.randrange(len(weapons))
     r = rng.randrange(len(rooms))
@@ -42,15 +41,16 @@ def main_random(knowledge, seed):
         return (ActionTypes.ACCUSE, *guess)
     return (ActionTypes.SUGGEST, *guess)
 
-def main_gamble(knowledge, seed, threshold=1):
+def main_gamble(knowledge, rng, threshold=2):
     suspects,weapons,rooms = _cards_setup(knowledge)
-    rng = random.Random(seed)
     s = rng.randrange(len(suspects))
     w = rng.randrange(len(weapons))
     r = rng.randrange(len(rooms))
     guess = (suspects[s], weapons[w], rooms[r])
 
     accusation_candidates = knowledge.accusation_candidates()
+    if len(accusation_candidates) <= 0:
+        return (ActionTypes.SUGGEST, *guess)
     if len(accusation_candidates) <= threshold:
         rnd = rng.randrange(len(accusation_candidates))
         guess = accusation_candidates[rnd]
@@ -58,9 +58,8 @@ def main_gamble(knowledge, seed, threshold=1):
     return (ActionTypes.SUGGEST, *guess)
 
 # Use one of owned cards in suggestion based on frequency
-def main_bluff(knowledge, seed, frequency=0.5):
+def main_bluff(knowledge, rng, frequency=0.5):
     suspects,weapons,rooms = _cards_setup(knowledge)
-    rng = random.Random(seed)
     if rng.random() < frequency:
         own_cards = knowledge.hand
         card = rng.choice(own_cards)
@@ -83,22 +82,23 @@ def _cards_setup(knowledge):
     rooms = [c for c in candidates if 21 > c >= 12]
     return suspects, weapons, rooms
 
-def after_suggest_certain(knowledge, seed):
+def after_suggest_certain(knowledge, rng):
     suspects,weapons,rooms = _cards_setup(knowledge)
     if len(suspects) == len(weapons) == len(rooms) == 1:
         guess = (suspects[0], weapons[0], rooms[0])
         return (ActionTypes.ACCUSE, *guess)
     return (ActionTypes.END,)
 
-def after_suggest_gamble(knowledge, seed, threshold=1):
+def after_suggest_gamble(knowledge, rng, threshold=2):
     suspects,weapons,rooms = _cards_setup(knowledge)
-    rng = random.Random(seed)
     s = rng.randrange(len(suspects))
     w = rng.randrange(len(weapons))
     r = rng.randrange(len(rooms))
     guess = (suspects[s], weapons[w], rooms[r])
 
     accusation_candidates = knowledge.accusation_candidates()
+    if len(accusation_candidates) <= 0:
+        return (ActionTypes.END,)
     if len(accusation_candidates) <= threshold:
         rnd = rng.randrange(len(accusation_candidates))
         guess = accusation_candidates[rnd]
