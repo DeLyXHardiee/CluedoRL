@@ -23,19 +23,48 @@ from Strategies import Strategy, main_first, after_suggest_certain, main_random,
 MAX_PLAYERS = 6
 OBS_SIZE = MAX_PLAYERS * 21 * 3 + 21 + 4 + MAX_PLAYERS + MAX_PLAYERS + 2 + MAX_PLAYERS * 21 # 543
 
+
 def bot(main=main_first, after_suggest=after_suggest_certain, knowledge=Knowledge):
       return lambda: CluedoActor(Strategy(main, after_suggest), knowledge)
 
-TRAIN_OPPONENTS = [
-    bot(),
-    bot(main_random),
-    bot(main_gamble, after_suggest_gamble),
-    bot(main_bluff),
-    bot(knowledge=GullibleKnowledge),
+bot_factory = {
+    "first/certain/knowledge": bot(main_first, after_suggest_certain, Knowledge),
+    "random/certain/gullible": bot(main_random, after_suggest_certain, GullibleKnowledge),
+    "gamble/gamble/knowledge": bot(main_gamble, after_suggest_gamble, Knowledge),
+    "bluff/certain/goodmemory": bot(main_bluff, after_suggest_certain, GoodMemoryKnowledge),
+    "first/gamble/goodmemory": bot(main_first, after_suggest_gamble, GoodMemoryKnowledge),
+    "gamble/gamble/goodmemory": bot(main_gamble, after_suggest_gamble, GoodMemoryKnowledge),
+    "bluff/certain/knowledge": bot(main_bluff, after_suggest_certain, Knowledge),
+    "first/certain/gullible": bot(main_first, after_suggest_certain, GullibleKnowledge),
+    "random/gamble/goodmemory": bot(main_random, after_suggest_gamble, GoodMemoryKnowledge),
+    "bluff/gamble/gullible": bot(main_bluff, after_suggest_gamble, GullibleKnowledge),
+    "random/certain/knowledge": bot(main_random, after_suggest_certain, Knowledge),
+}
+
+TRAIN_POOL = [
+    "first/certain/knowledge",
+    "random/certain/gullible",
+    "gamble/gamble/knowledge",
+    "bluff/certain/goodmemory",
+    "first/gamble/goodmemory",
 ]
-EVAL_OPPONENTS = [
-    bot(knowledge=GoodMemoryKnowledge),
+
+VAL_POOL = [
+    "gamble/gamble/goodmemory",
+    "bluff/certain/knowledge",
+    "first/certain/gullible",
 ]
+
+TEST_POOL = [
+    "random/gamble/goodmemory",
+    "bluff/gamble/gullible",
+    "random/certain/knowledge",
+]
+
+assert not any(bot in VAL_POOL for bot in TRAIN_POOL), "Validation pool overlaps with training pool"
+assert not any(bot in TEST_POOL for bot in TRAIN_POOL), "Test pool overlaps with training pool"
+assert not any(bot in TEST_POOL for bot in VAL_POOL), "Test pool overlaps with validation pool"
+
 
 def build_actions():
     # lookup table
@@ -96,7 +125,7 @@ class ClueEnv(EnvBase):
                 actors.append(self.actor)
 
             self.game.start(actors)
-            self.game.play(stop_at=self.seat)
+            self.game.play(stop_at=self.actor.seat)
             if not self.game.done:
                 break
 
@@ -118,7 +147,7 @@ class ClueEnv(EnvBase):
 
         eliminated = self.actor in self.game.eliminated_players
         if not eliminated:
-            self.game.play(stop_at=self.seat)
+            self.game.play(stop_at=self.actor.seat)
 
         won = self.game.winner is self.actor
         truncated = self.game.truncated
@@ -219,7 +248,7 @@ def build_observation(actor):
 
     # Game state
     eliminated = torch.zeros(MAX_PLAYERS, dtype=torch.float32)
-    eliminated_players = torch.tensor([p in game.eliminated_players for p in game.players], dtype=torch.float32)
+    eliminated_players = torch.tensor([p in game.eliminated_players for p in game.seatToPlayer.values()], dtype=torch.float32)
     eliminated_players = torch.roll(eliminated_players, shifts=-actor.seat, dims=0)
     for i in range(len(eliminated_players)):
         if eliminated_players[i]:
@@ -302,6 +331,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
     minibatch_size = 512
     epochs = 4
 
+    train = "self-play" if self_play else [bot for bot in TRAIN_POOL]
     config = {
         "seed": seed,
         "self_play": self_play,
@@ -321,7 +351,12 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
         "eval_seed": eval_seed,
         "patience": patience,
         "min_delta": min_delta,
-        "player_counts": player_counts
+        "player_counts": player_counts,
+        "pools": {
+            "train": train,
+            "val": [bot for bot in VAL_POOL],
+            "test": [bot for bot in TEST_POOL]
+        }
     }
 
     with open(os.path.join(run_dir, "config.json"), "w") as f:
@@ -342,7 +377,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
 
     snapshot()
 
-    opponent_factories = TRAIN_OPPONENTS
+    opponent_factories = [bot_factory[bot] for bot in TRAIN_POOL]
     if self_play:
         opponent_factories = [self_play_opponent]
 
@@ -390,7 +425,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
 
             if (i + 1) % checkpoint_every == 0:
                 torch.save(actor.state_dict(), os.path.join(run_dir, f"batch_{i + 1}.pt"))
-                eval_dict = evaluate(actor, TRAIN_OPPONENTS, games=eval_games, seed=eval_seed, player_counts=player_counts)
+                eval_dict = evaluate(actor, VAL_POOL, games=eval_games, seed=eval_seed, player_counts=player_counts)
                 writer_eval.writerow([i, (i + 1) * batch_size, eval_dict["combined"]] + [eval_dict[player] for player in player_counts])
                 f_eval.flush()
                 if eval_dict["combined"] > best_score + min_delta:
@@ -416,6 +451,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
 
 def evaluate(actor, opponent_factories, games=2000, seed=1, player_counts=(3, 4, 5, 6)):
     win_rates = {}
+    opponent_factories = [bot_factory[bot] for bot in opponent_factories]
 
     for player_count in player_counts:
         env = ClueEnv(opponent_factories, seed=seed, player_counts=(player_count,))
@@ -446,7 +482,7 @@ def load_actor(path="checkpoints/path_to_model.pt"):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "eval":
-        evaluate(load_actor(), TRAIN_OPPONENTS)
+        evaluate(load_actor(), TEST_POOL)
     elif len(sys.argv) > 1 and sys.argv[1] == "self":
         if len(sys.argv) > 2:
             train(max_frames=int(sys.argv[2]), self_play=True)

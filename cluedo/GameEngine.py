@@ -132,7 +132,7 @@ class CluedoGameEngine:
         if self.turns_taken >= self.max_turns:
             self.done = True
             self.truncated = True
-            self.printToFile()
+            #self.printToFile()
 
     # Execute a single game step based on the player's action.
     def step(self, action):
@@ -166,7 +166,7 @@ class CluedoGameEngine:
             if correct:
                 self.winner = player
                 self.done = True
-                self.printToFile()
+                #self.printToFile()
             else:
                 self.eliminated_players.append(player)
                 if len(self.eliminated_players) == self.n_players:
@@ -176,7 +176,7 @@ class CluedoGameEngine:
 
     def play(self, stop_at=None):
         while not self.done and self.current_turn != stop_at:
-            player = self.players[self.current_turn]
+            player = self.seatToPlayer[self.current_turn]
             if player in self.eliminated_players:
                 self.next_turn()
                 continue
