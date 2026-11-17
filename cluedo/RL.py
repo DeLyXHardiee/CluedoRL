@@ -287,6 +287,9 @@ def build_action_mask(actor):
 
 class RLActor(CluedoActor):
 
+    def __repr__(self):
+        return f"RLActor(policy = {self.policy.__class__.__name__})"
+
     def __init__(self, policy):
         super().__init__(strategy=self)
         self.policy = policy
