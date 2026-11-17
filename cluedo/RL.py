@@ -108,6 +108,7 @@ class ClueEnv(EnvBase):
             truncated=Categorical(n=2, shape=(1,), dtype=torch.bool),
             shape=(),
         )
+        self.penalty_scale=1.0
         self.set_seed(seed)
 
     def _set_seed(self, seed):
@@ -155,7 +156,11 @@ class ClueEnv(EnvBase):
         truncated = self.game.truncated
         terminated = eliminated or (self.game.done and not truncated)
         done = terminated or truncated
-        reward = 1.0 if won else 0.0
+        reward = 0.0
+        if won:
+            reward = 1.0
+        elif eliminated:
+            reward = -self.penalty_scale / self.player_count
 
         observation = build_observation(self.actor)
         action_mask = build_action_mask(self.actor)
@@ -330,7 +335,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
     learning_rate = 3e-4
     clip = 0.2
     entropy = 0.01
-    gamma = 0.99
+    gamma = 1.0
     lmbda = 0.95
     batch_size = 4096
     minibatch_size = 512
@@ -445,7 +450,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
                         print(f"Early stopping triggered after {i + 1} batches due to no improvement in score.")
                         stop = True
 
-            wins = batch["next", "reward"].sum()
+            wins = (batch["next", "reward"] > 0).sum()
             games = batch["next", "done"].sum()
             writer.writerow([i, (i + 1) * batch_size, (wins / games).item(), losses["loss_objective"].item(), losses["loss_critic"].item(), losses["loss_entropy"].item()])
             f.flush()
@@ -481,7 +486,7 @@ def evaluate(actor, opponent_factories, games=2000, seed=1, player_counts=(3, 4,
     win_rates["combined"] = combined_score
     return win_rates
 
-def load_actor(path="checkpoints/path_to_model.pt"):
+def load_actor(path="checkpoints/filepath/best.pt"):
     actor = make_actor()
     actor.load_state_dict(torch.load(path))
     return actor
