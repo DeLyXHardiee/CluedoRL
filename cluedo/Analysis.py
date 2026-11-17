@@ -42,14 +42,14 @@ class RecordingEngine(CluedoGameEngine):
             temp["correct"] = player == self.winner
         self.action_log.append(temp)
 
-def test_pool_lineup(label, policy, n):
+def create_lineup(botList, label, policy, n):
     def make(rng):
         lineup = []
         model = (label, lambda: RLActor(policy))
         lineup.append(model)
         for i in range(n-1):
-            name = rng.choice(TEST_POOL)
-            lineup.append((name, bot_factory[name]))
+            chosen = rng.choice(botList.bots)
+            lineup.append((chosen.__repr__(), chosen))
         return lineup
     return make
 
@@ -95,12 +95,13 @@ def save_rows(rows, path):
                 row["eliminated"] = " ".join(row["eliminated"])
             writer.writerow(row)
         
-def analyse_model(path, label, out_dir, games=2000, seed=1):
+def analyse_model(path, label, botLists, out_dir, games=2000, seed=1):
     policy = load_actor(path)
     os.makedirs(out_dir, exist_ok=True)
     for n in (3, 4, 5, 6):
-        action_rows, game_rows = play_games(test_pool_lineup(label, policy, n), games, seed)
-        actions_path = os.path.join(out_dir, f"test_{n}_actions.csv")
-        game_path = os.path.join(out_dir, f"test_{n}_game.csv")
-        save_rows(action_rows, actions_path)
-        save_rows(game_rows, game_path)
+        for botList in botLists:
+            action_rows, game_rows = play_games(create_lineup(botList, label, policy, n), games, seed)
+            actions_path = os.path.join(out_dir, f"test_{n}_{botList.name}_actions.csv")
+            game_path = os.path.join(out_dir, f"test_{n}_{botList.name}_game.csv")
+            save_rows(action_rows, actions_path)
+            save_rows(game_rows, game_path)

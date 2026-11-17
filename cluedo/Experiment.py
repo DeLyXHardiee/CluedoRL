@@ -8,17 +8,11 @@ from GameEngine import CluedoGameEngine
 from RL import RLActor, load_actor
 import bots
 from functools import partial
+from Analysis import analyse_model
     
 main_strategies = [main_first, main_random, main_gamble, main_bluff]
 after_suggest_strategies = [after_suggest_certain, after_suggest_gamble]
 knowledges = [Knowledge, GullibleKnowledge, GoodMemoryKnowledge]
-
-#From RL.py
-TEST_POOL = [
-    bots.random_gamble_goodMemory_bot(),
-    bots.bluff_gamble_gullible_bot(),
-    bots.random_certain_knowledge_bot(),
-]
 
 class Experiment:
     def __init__(self, name="", players=None, seed=0, num_games=1):
@@ -72,30 +66,15 @@ def run_experiment(name, players, seed=0, num_games=1000):
     experiment = Experiment(name=name, players=players, seed=seed, num_games=num_games)
     return evaluate(experiment)
 
-def get_random_bots_list(n, seed=0):
-    botList = []
-    for i in range(n):
-        botList.append(bots.randomBot(random.Random(seed + i)))
-    return botList
-
-def get_test_pool_list(numPlayers=6,seed=0):
-    rng = random.Random(seed)
-    return [TEST_POOL[rng.randint(0, len(TEST_POOL) - 1)] for _ in range(numPlayers)]
-
 def run_all_experiments(seed=0, numgames=1000):
-    rl_agents = []
     bot_lists = []
-    for i in range(2,6):
-        bot_lists.append(bots.BotList(f"{i} Random Bots", get_random_bots_list(i, seed=seed+i)))
-        bot_lists.append(bots.BotList(f"{i} Test Pool", get_test_pool_list(i, seed=seed+i)))
+    bot_lists.append(bots.BotList(f"all_bots", bots.all_bots()))
+    bot_lists.append(bots.BotList(f"test_pool", bots.TEST_POOL))
 
-    runs = [line for line in (Path(__file__).parent/"runs.txt").read_text().splitlines()]
-    for run in runs:
-        rl_agents.append(RLActor(load_actor(Path(__file__).parent / "checkpoints" / run / "best.pt")))
-
-    for i, agent in enumerate(rl_agents):
-        for j, bot_list in enumerate(bot_lists):
-            run_experiment(f"{runs[i]} vs {bot_list.name}", [agent] + bot_list.get_bots(), seed=seed+i+j, num_games=numgames)
+    models = [line for line in (Path(__file__).parent/"models.txt").read_text().splitlines()]
+    for i, model in enumerate(models):
+        path = Path(__file__).parent / "checkpoints" / model / "best.pt"
+        analyse_model(path, model, bot_lists, Path(__file__).parent / "analysis" / model, games=numgames, seed=seed+i)
 
 if __name__ == "__main__":
     seed = 42
