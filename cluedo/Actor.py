@@ -10,6 +10,9 @@ class CluedoActor():
         self.strategy = strategy
         self.knowledge_class = knowledge_class or Knowledge
 
+    def __repr__(self):
+        return f"CluedoActor({self.strategy.main.__name__}, {self.strategy.after_suggest.__name__}, {self.knowledge_class.__name__})"
+
     def reset(self, gameEngine, seat, n, hand, public_cards, seed):
         self.gameEngine = gameEngine
         self.seat = seat
