@@ -47,3 +47,12 @@ bluff_certain_knowledge_bot = bot(main_bluff, after_suggest_certain, Knowledge)
 bluff_gamble_goodMemory_bot = bot(main_bluff, after_suggest_gamble, GoodMemoryKnowledge)
 bluff_gamble_gullible_bot = bot(main_bluff, after_suggest_gamble, GullibleKnowledge)
 bluff_gamble_knowledge_bot = bot(main_bluff, after_suggest_gamble, Knowledge)
+
+class BotList:
+
+    def __init__(self, name, bots):
+        self.name = name
+        self.bots = bots
+        
+    def get_bots(self):
+        return self.bots
