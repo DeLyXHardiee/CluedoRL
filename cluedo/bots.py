@@ -1,4 +1,4 @@
-from random import choice
+import random
 
 from Actor import CluedoActor, Knowledge, GullibleKnowledge, GoodMemoryKnowledge
 from Strategies import Strategy, main_first, main_random, main_gamble, main_bluff, after_suggest_certain, after_suggest_gamble
@@ -11,14 +11,21 @@ knowledges = [Knowledge, GullibleKnowledge, GoodMemoryKnowledge]
 
 
 def randomBot(seed):
-    return CluedoActor(
+    seed = random.Random(seed)
+    return lambda: CluedoActor(
         Strategy(seed.choice(main_strategies), seed.choice(after_suggest_strategies)),
         seed.choice(knowledges))
 
+def all_bots():
+    bots_list = []
+    for main in main_strategies:
+        for after_suggest in after_suggest_strategies:
+            for knowledge in knowledges:
+                bots_list.append(bot(main, after_suggest, knowledge))
+    return bots_list
 
 def bot(main, after_suggest, knowledge):
     return lambda: CluedoActor(Strategy(main, after_suggest), knowledge)
-
 
 first_certain_goodMemory_bot = bot(main_first, after_suggest_certain, GoodMemoryKnowledge)
 first_certain_gullible_bot = bot(main_first, after_suggest_certain, GullibleKnowledge)
@@ -47,3 +54,19 @@ bluff_certain_knowledge_bot = bot(main_bluff, after_suggest_certain, Knowledge)
 bluff_gamble_goodMemory_bot = bot(main_bluff, after_suggest_gamble, GoodMemoryKnowledge)
 bluff_gamble_gullible_bot = bot(main_bluff, after_suggest_gamble, GullibleKnowledge)
 bluff_gamble_knowledge_bot = bot(main_bluff, after_suggest_gamble, Knowledge)
+
+class BotList:
+
+    def __init__(self, name, bots):
+        self.name = name
+        self.bots = bots
+
+    def get_bots(self):
+        return self.bots
+
+
+TEST_POOL = [
+    random_gamble_goodMemory_bot,
+    bluff_gamble_gullible_bot,
+    random_certain_knowledge_bot,
+]

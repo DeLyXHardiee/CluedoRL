@@ -1,6 +1,6 @@
 from pathlib import Path
 import math
-from random import Random, seed, randint, random, shuffle
+import random
 
 from Actor import CluedoActor, Knowledge, GullibleKnowledge, GoodMemoryKnowledge
 from Strategies import Strategy, main_first, main_random, main_gamble, main_bluff, after_suggest_certain, after_suggest_gamble
@@ -8,6 +8,7 @@ from GameEngine import CluedoGameEngine
 from RL import RLActor, load_actor
 import bots
 from functools import partial
+from Analysis import analyse_model
     
 main_strategies = [main_first, main_random, main_gamble, main_bluff]
 after_suggest_strategies = [after_suggest_certain, after_suggest_gamble]
@@ -25,14 +26,15 @@ class Experiment:
     def run(self):
         for i in range(self.num_games):
             game = CluedoGameEngine(seed=self.seed + i)
-            if i % 1000 == 0:
-                print(f"Starting game {i}")
+            #if i % 1000 == 0:
+            #    print(f"Starting game {i}")
             game.start(self.players)
             game.play()
             self.games.append(game.get_game_dict())
         return self.games
 
 def evaluate(experiment):
+    print(f"Experiment {experiment.name}")
     games = experiment.run()
     stats = {
         "total_games": len(games),
@@ -52,46 +54,29 @@ def evaluate(experiment):
             half_width = 1.96 * math.sqrt(rate * (1 - rate) / len(games))
             stats["win_rates"][player] = rate
             stats["win_rate_95_half_widths"][player] = half_width
-            print(f"Player {index} ({player}): win rate {rate:.3f} +/- {half_width:.3f} over {len(games)} games")
+            print(f"Player {index} ({player}): win rate {rate:.3f} +/- {half_width:.3f} over {len(games)} games and {stats['eliminations'][player]} eliminations")
         else:
             stats["win_rates"][player] = None
             stats["win_rate_95_half_widths"][player] = None
     #print(stats)
+    print()
     return stats, games
 
-def run_game_analysis(experiment):
+def run_experiment(name, players, seed=0, num_games=1000):
+    experiment = Experiment(name=name, players=players, seed=seed, num_games=num_games)
     return evaluate(experiment)
 
-def run_rl_vs_randombots(rl_bot, num_random_bots=5, num_games=1000, seed=0):
-    players = [rl_bot]
-    for i in range(num_random_bots):
-        seed += 1
-        players.append(bots.randomBot(Random(seed)))
-    experiment = Experiment(name="RL vs Random Bot", players=players, seed=seed, num_games=num_games)
-    return run_game_analysis(experiment)
+def run_all_experiments(seed=0, numgames=1000):
+    bot_lists = []
+    bot_lists.append(bots.BotList(f"all_bots", bots.all_bots()))
+    bot_lists.append(bots.BotList(f"test_pool", bots.TEST_POOL))
 
-def run_rl_vs_fixedbot(rl_bot, fixed_bot, num_bot=5, num_games=1000, seed=0):
-    players = [rl_bot] + [fixed_bot() for _ in range(num_bot)]
-    experiment = Experiment(name="RL vs Fixed Bot", players=players, seed=seed, num_games=num_games)
-    return run_game_analysis(experiment)
-
-def run_rl_vs_botList(rl_bot, bot_list, num_games=1000, seed=0):
-    players = [rl_bot] + bot_list
-    experiment = Experiment(name="RL vs Bot List", players=players, seed=seed, num_games=num_games)
-    return run_game_analysis(experiment)
+    models = [line for line in (Path(__file__).parent/"models.txt").read_text().splitlines()]
+    for i, model in enumerate(models):
+        path = Path(__file__).parent / "checkpoints" / model / "best.pt"
+        analyse_model(path, model, bot_lists, Path(__file__).parent / "analysis" / model, games=numgames, seed=seed+i)
 
 if __name__ == "__main__":
-    seed = 5
-    runName = 'self_run_20261113-132203_0'
-    #runName = 'bots_run_20261116-005339_0'
-    checkpoint = (
-        Path(__file__).parent
-        / "checkpoints"
-        / runName
-        / "best.pt"
-    )
-    RLAgent = RLActor(load_actor(checkpoint))
-    smartActor = CluedoActor(Strategy(main_random, partial(after_suggest_gamble, threshold=3)), GoodMemoryKnowledge)
-    run_rl_vs_randombots(RLAgent, seed=seed)
-    #run_rl_vs_fixedbot(smartActor, bots.bluff_certain_goodMemory_bot)
-    #run_rl_vs_botList(smartActor, [bots.bluff_certain_goodMemory_bot(), bots.first_certain_goodMemory_bot()])
+    seed = 42
+    numgames = 1000
+    run_all_experiments(seed=seed, numgames=numgames)
