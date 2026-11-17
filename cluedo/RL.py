@@ -177,10 +177,12 @@ class ClueEnv(EnvBase):
 
 class FactoredPolicy(torch.nn.Module):
     
-    def __init__(self):
+    def __init__(self, normalize=True):
         super().__init__()
+        self.normalize=normalize
         self.body = MLP(in_features=OBS_SIZE, out_features=45, num_cells=[256, 256])
         self.actions = build_actions()
+        self.groups = [(0, 3), (3, 9), (9, 15), (15, 24), (24, 30), (30, 36), (36, 45)]
         kind_idx = []
         s_idx = []
         w_idx = []
@@ -212,11 +214,20 @@ class FactoredPolicy(torch.nn.Module):
         self.register_buffer("w_idx", w_idx, persistent=False)
         self.register_buffer("r_idx", r_idx, persistent=False)
 
-    def forward(self, observation):
+    def forward(self, observation, action_mask):
         output = self.body(observation)
         zeros_column = torch.zeros_like(output[..., :1])
         output = torch.cat((output, zeros_column), dim=-1)
-        return output[..., self.kind_idx] + output[..., self.s_idx] + output[..., self.w_idx] + output[..., self.r_idx] # one logit per slot in action table's order
+        if self.normalize:
+            kind_logp = torch.log_softmax(output[..., :3], dim=-1)
+            cards = output[..., self.s_idx] + output[..., self.w_idx] + output[..., self.r_idx]
+            cards = cards.masked_fill(~action_mask, -1e9)
+            card_logp = torch.cat([torch.log_softmax(cards[..., :324], dim=-1),
+                         torch.log_softmax(cards[..., 324:648], dim=-1),
+                         torch.log_softmax(cards[..., 648:], dim=-1)], dim=-1)
+            return kind_logp[..., self.kind_idx] + card_logp
+        else:
+            return output[..., self.kind_idx] + output[..., self.s_idx] + output[..., self.w_idx] + output[..., self.r_idx] # one logit per slot in action table's order
 
 def build_observation(actor):
     game = actor.gameEngine
@@ -311,8 +322,8 @@ class RLActor(CluedoActor):
         return ACTIONS[int(tensordict["action"])]
 
 
-def make_actor():
-      module = TensorDictModule(FactoredPolicy(), in_keys=["observation"], out_keys=["logits"])
+def make_actor(normalize=True):
+      module = TensorDictModule(FactoredPolicy(normalize), in_keys=["observation", "action_mask"], out_keys=["logits"])
       return ProbabilisticActor(
           module,
           in_keys={"logits": "logits", "mask": "action_mask"},
@@ -325,7 +336,7 @@ def make_critic():
     net = MLP(in_features=OBS_SIZE, out_features=1, num_cells=[256, 256])
     return ValueOperator(net, in_keys=["observation"])
 
-def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size=20, run_name="run", checkpoint_every=100, eval_games=2000, eval_seed=1000, patience=5, min_delta=0.04, player_counts=(3, 4, 5, 6)):
+def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size=20, run_name="run", checkpoint_every=100, eval_games=2000, eval_seed=1000, patience=5, min_delta=0.025, player_counts=(3, 4, 5, 6), normalize=True, smooth_window=3):
     torch.manual_seed(seed)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     run_name = f"{run_name}_{timestamp}_{seed}"
@@ -360,6 +371,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
         "eval_games": eval_games,
         "eval_seed": eval_seed,
         "patience": patience,
+        "smooth_window": smooth_window,
         "min_delta": min_delta,
         "player_counts": player_counts,
         "pools": {
@@ -368,14 +380,15 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
             "test": [bot for bot in TEST_POOL]
         },
         "git_hash": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__))).stdout.strip(),
-        "git_dirty": subprocess.run(["git", "diff", "HEAD", "--quiet"], capture_output=True, cwd=os.path.dirname(os.path.abspath(__file__))).returncode != 0
+        "git_dirty": subprocess.run(["git", "diff", "HEAD", "--quiet"], capture_output=True, cwd=os.path.dirname(os.path.abspath(__file__))).returncode != 0,
+        "normalized_policy": normalize
     }
 
     with open(os.path.join(run_dir, "config.json"), "w") as f:
         json.dump(config, f, indent=2)
 
     def snapshot():
-        actor_inner = make_actor()
+        actor_inner = make_actor(normalize)
         actor_inner.load_state_dict(actor.state_dict())
         pool.append(actor_inner)
 
@@ -383,7 +396,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
         policy = pool_rng.choice(pool)
         return RLActor(policy)
     
-    actor = make_actor()
+    actor = make_actor(normalize)
     pool = []
     pool_rng = random.Random(seed)
 
@@ -409,9 +422,10 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
         writer = csv.writer(f)
         writer.writerow(["batch", "frames", "train_win_rate", "loss_objective", "loss_critic", "loss_entropy"])
         writer_eval = csv.writer(f_eval)
-        writer_eval.writerow(["batch", "frames", "eval_combined_score"] + [f"eval_player_count_{player_count}_win_rate" for player_count in player_counts])
+        writer_eval.writerow(["batch", "frames", "eval_combined_score", "eval_smoothed_score"] + [f"eval_player_count_{player_count}_win_rate" for player_count in player_counts])
 
-        best_score = 0.0
+        recent_scores = []
+        best_smoothed_score = 0.0
         counter = 0
         stop = False
 
@@ -438,10 +452,12 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
             if (i + 1) % checkpoint_every == 0:
                 torch.save(actor.state_dict(), os.path.join(run_dir, f"batch_{i + 1}.pt"))
                 eval_dict = evaluate(actor, VAL_POOL, games=eval_games, seed=eval_seed, player_counts=player_counts)
-                writer_eval.writerow([i, (i + 1) * batch_size, eval_dict["combined"]] + [eval_dict[player] for player in player_counts])
+                recent_scores.append(eval_dict["combined"])
+                mean_score = sum(recent_scores[-smooth_window:]) / len(recent_scores[-smooth_window:])
+                writer_eval.writerow([i, (i + 1) * batch_size, eval_dict["combined"], mean_score] + [eval_dict[player] for player in player_counts])
                 f_eval.flush()
-                if eval_dict["combined"] > best_score + min_delta:
-                    best_score = eval_dict["combined"]
+                if mean_score > best_smoothed_score + min_delta:
+                    best_smoothed_score = mean_score
                     counter = 0
                     torch.save(actor.state_dict(), os.path.join(run_dir, "best.pt"))
                 else:
@@ -486,8 +502,8 @@ def evaluate(actor, opponent_factories, games=2000, seed=1, player_counts=(3, 4,
     win_rates["combined"] = combined_score
     return win_rates
 
-def load_actor(path="checkpoints/filepath/best.pt"):
-    actor = make_actor()
+def load_actor(path="checkpoints/filepath/best.pt", normalize=True):
+    actor = make_actor(normalize)
     actor.load_state_dict(torch.load(path))
     return actor
 
