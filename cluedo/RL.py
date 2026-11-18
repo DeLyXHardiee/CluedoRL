@@ -82,6 +82,7 @@ def build_actions():
 ACTIONS = build_actions()
 ACTION_TO_INDEX = {action: index for index, action in enumerate(ACTIONS)}
 COMBINATION_COUNT = 6 * 6 * 9 # suspects * weapons * rooms
+ACCUSE_LIMIT = 30
 
 class ClueEnv(EnvBase):
 
@@ -290,9 +291,10 @@ def build_action_mask(actor):
     if game.phase == MAIN:
         action_mask[0:COMBINATION_COUNT] = True
 
-    for candidate in accusation_candidates:
-        index = ACTION_TO_INDEX[(ACCUSE, candidate[0], candidate[1], candidate[2])]
-        action_mask[index] = True
+    if len(accusation_candidates ) <= ACCUSE_LIMIT:
+        for candidate in accusation_candidates:
+            index = ACTION_TO_INDEX[(ACCUSE, candidate[0], candidate[1], candidate[2])]
+            action_mask[index] = True
 
     if game.phase == AFTER_SUGGEST:
         action_mask[-1] = True 
@@ -372,6 +374,7 @@ def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size
         "eval_seed": eval_seed,
         "patience": patience,
         "smooth_window": smooth_window,
+        "accuse_limit": ACCUSE_LIMIT,
         "min_delta": min_delta,
         "player_counts": player_counts,
         "pools": {
@@ -502,7 +505,7 @@ def evaluate(actor, opponent_factories, games=2000, seed=1, player_counts=(3, 4,
     win_rates["combined"] = combined_score
     return win_rates
 
-def load_actor(path="checkpoints/filepath/best.pt", normalize=True):
+def load_actor(path="checkpoints/self_run_20261117-175453_0/best.pt", normalize=True):
     actor = make_actor(normalize)
     actor.load_state_dict(torch.load(path))
     return actor
