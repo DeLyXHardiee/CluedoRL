@@ -3,6 +3,7 @@ import csv
 import random
 import os
 import matplotlib.pyplot as plt
+import statistics
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END
 from RL import RLActor, load_actor, bot_factory, TEST_POOL
 from torchrl.envs.utils import set_exploration_type, ExplorationType
@@ -185,3 +186,115 @@ def plot_eval_log(run_dir):
 def plot_run(run_dir):
     plot_train_log(run_dir)
     plot_eval_log(run_dir)
+
+
+
+METHODS = {"bots_run": "Bot-trained", "self_run": "Self-play"}
+COLORS = {"bots_run": "#1f77b4", "self_run": "#e8702a"}
+POOLS = ["all_bots", "test_pool", "falls_for_bluffs",
+         "always_first", "uses_bluffs", "good_memory"]
+T95 = {2: 12.71, 3: 4.30, 4: 3.18, 5: 2.78, 6: 2.57}
+
+def models_of(method, root):
+    return sorted(m for m in os.listdir(root) if m.startswith(method))
+
+def read_rows(root, model, n, pool, kind):
+    path = os.path.join(root, model, f"test_{n}_{pool}_{kind}.csv")
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f))
+
+def mean_ci(values):
+    half = T95[len(values)] * statistics.stdev(values) / len(values) ** 0.5
+    return statistics.mean(values), half
+
+def grouped_bars(ax, groups, get_values):
+    for offset, method in zip((-0.2, 0.2), METHODS):
+        stats = [mean_ci(get_values(method, group)) for group in groups]
+        x = [i + offset for i in range(len(groups))]
+        ax.bar(x, [s[0] for s in stats], 0.38, yerr=[s[1] for s in stats],
+               capsize=3, color=COLORS[method], label=METHODS[method])
+    ax.set_xticks(range(len(groups)))
+    ax.set_xticklabels([str(group).replace("_", "\n") for group in groups])
+    ax.grid(axis="y", alpha=0.3)
+    ax.set_axisbelow(True)
+
+def plot_win_rates(root="analysis"):
+    def win_rate(model, n, pool):
+        rows = read_rows(root, model, n, pool, "game")
+        return sum(row["winner"] == model for row in rows) / len(rows)
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8), layout="constrained")
+    for ax, n in zip(axes.flat, (3, 4, 5, 6)):
+        def values(method, pool):
+            return [win_rate(m, n, pool) for m in models_of(method, root)]
+        grouped_bars(ax, POOLS, values)
+        ax.axhline(1 / n, color="gray", linestyle="--", label="Fair share")
+        ax.set_title(f"{n} players")
+        ax.set_ylabel("Win rate")
+    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="outside upper center", ncols=3)
+    fig.savefig(os.path.join(root, "win_rates.png"), dpi=200)
+    plt.close(fig)
+
+def behaviour(root, model, n, pool):
+    actions = read_rows(root, model, n, pool, "actions")
+    games = read_rows(root, model, n, pool, "game")
+    actions = [row for row in actions if row["label"] == model]
+    suggests = [row for row in actions if row["kind"] == "SUGGEST"]
+    accuses = [row for row in actions if row["kind"] == "ACCUSE"]
+    wins = [row for row in games if row["winner"] == model]
+    return {
+        "bluff": sum(int(r["own_cards"]) > 0 for r in suggests) / len(suggests),
+        "correct": sum(r["correct"] == "True" for r in accuses) / len(accuses),
+        "eliminated": sum(model in r["eliminated"].split() for r in games) / len(games),
+        "candidates": [int(r["accusation_candidates"]) for r in accuses],
+        "win_turns": [int(r["turns_taken"]) / n for r in wins],
+    }
+
+def plot_behaviour(root="analysis", pool="test_pool"):
+    data = {}
+    for method in METHODS:
+        for n in (3, 4, 5, 6):
+            data[method, n] = [behaviour(root, m, n, pool) for m in models_of(method, root)]
+
+    titles = {
+        "bluff": "Suggestions naming an own card",
+        "correct": "Correct accusations",
+        "eliminated": "Games where the model is eliminated",
+    }
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.5), layout="constrained")
+    for ax, (key, title) in zip(axes, titles.items()):
+        grouped_bars(ax, (3, 4, 5, 6), lambda method, n: [d[key] for d in data[method, n]])
+        ax.set_title(title)
+        ax.set_xlabel("Players")
+        ax.set_ylabel("Share")
+    fig.legend(*axes[0].get_legend_handles_labels(), loc="outside upper center", ncols=2)
+    fig.savefig(os.path.join(root, f"behaviour_{pool}.png"), dpi=200)
+    plt.close(fig)
+
+    plot_histograms(data, "candidates", "Solutions left at accusation", range(1, 32),
+                    os.path.join(root, f"hist_candidates_{pool}.png"))
+    plot_histograms(data, "win_turns", "Rounds played in won games", range(0, 21),
+                    os.path.join(root, f"hist_rounds_{pool}.png"))
+
+def plot_histograms(data, key, xlabel, bins, path):
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7), layout="constrained")
+    for ax, n in zip(axes.flat, (3, 4, 5, 6)):
+        for method in METHODS:
+            values = [v for d in data[method, n] for v in d[key]]
+            weights = [1 / len(values)] * len(values)
+            ax.hist(values, bins, weights=weights, histtype="step", linewidth=2,
+                    color=COLORS[method], label=METHODS[method])
+        ax.set_title(f"{n} players")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("Share")
+        ax.grid(alpha=0.3)
+    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="outside upper center", ncols=2)
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+def plot_experiments(root="analysis"):
+    plot_win_rates(root)
+    plot_behaviour(root)
