@@ -80,10 +80,9 @@ def run_all_experiments(seed=0, numgames=1000):
     models = [line for line in (Path(__file__).parent/"models.txt").read_text().splitlines()]
     for i, model in enumerate(models):
         path = Path(__file__).parent / "checkpoints" / model / "best.pt"
-        #analyse_model(path, model, bot_lists, Path(__file__).parent / "analysis" / model, games=numgames, seed=seed+i)
+        analyse_model(path, model, bot_lists, Path(__file__).parent / "analysis" / model, games=numgames, seed=seed+i)
         for botname,bot in list(testBots.items())[:3]:
-            d = 0
-            #analyse_bot(path, model, bot, botname, Path(__file__).parent / "analysis" / model, games=numgames, seed=seed+i+1)
+            analyse_bot(path, model, bot, botname, Path(__file__).parent / "analysis" / model, games=numgames, seed=seed+i+1)
     
     # Can define specific model here, probably uneccesary to do for all models
     model1 = models[0] if models else None
