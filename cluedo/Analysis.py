@@ -130,12 +130,13 @@ def analyse_model_vs_model(path1, label1, path2, label2, out_dir, games=2000, se
     policy1 = load_actor(path1)
     policy2 = load_actor(path2)
     os.makedirs(out_dir, exist_ok=True)
-    for n in (2, 4, 6):
+    for n in (4, 6):
         model1Lineup = [(label1, lambda: RLActor(policy1)) for i in range(n//2)]
         model2Lineup = [(label2, lambda: RLActor(policy2)) for i in range(n//2)]
-        action_rows, game_rows = play_games(model1Lineup + model2Lineup, games, seed)
-        actions_path = os.path.join(out_dir, f"test_{n}_{label1}_vs_{label2}_actions.csv")
-        game_path = os.path.join(out_dir, f"test_{n}_{label1}_vs_{label2}_game.csv")
+        lineup = lambda rng: model1Lineup + model2Lineup
+        action_rows, game_rows = play_games(lineup, games, seed)
+        actions_path = os.path.join(out_dir, f"test_{n*2}_{label1}_vs_{label2}_actions.csv")
+        game_path = os.path.join(out_dir, f"test_{n*2}_{label1}_vs_{label2}_game.csv")
         save_rows(action_rows, actions_path)
         save_rows(game_rows, game_path)
 
