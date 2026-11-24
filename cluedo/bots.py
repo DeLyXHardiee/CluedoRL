@@ -70,3 +70,43 @@ TEST_POOL = [
     bluff_gamble_gullible_bot,
     random_certain_knowledge_bot,
 ]
+
+FALLS_FOR_BLUFFS = [
+    bluff_certain_gullible_bot,
+    bluff_gamble_gullible_bot,
+    gamble_gamble_gullible_bot,
+    first_gamble_gullible_bot,
+    gamble_certain_gullible_bot,
+    first_certain_gullible_bot,
+    random_certain_gullible_bot,
+    random_gamble_gullible_bot,
+]
+
+ALWAYS_FIRST = [
+    first_certain_goodMemory_bot,
+    first_certain_gullible_bot,
+    first_certain_knowledge_bot,
+    first_gamble_goodMemory_bot,
+    first_gamble_gullible_bot,
+    first_gamble_knowledge_bot,
+]
+
+USES_BLUFFS = [
+    bluff_certain_goodMemory_bot,
+    bluff_certain_gullible_bot,
+    bluff_certain_knowledge_bot,
+    bluff_gamble_goodMemory_bot,
+    bluff_gamble_gullible_bot,
+    bluff_gamble_knowledge_bot,
+]
+
+GOOD_MEMORY = [
+    random_certain_goodMemory_bot,
+    random_gamble_goodMemory_bot,
+    gamble_certain_goodMemory_bot,
+    gamble_gamble_goodMemory_bot,
+    bluff_certain_goodMemory_bot,
+    bluff_gamble_goodMemory_bot,
+    first_certain_goodMemory_bot,
+    first_gamble_goodMemory_bot,
+]
