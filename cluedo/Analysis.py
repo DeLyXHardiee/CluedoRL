@@ -62,7 +62,7 @@ def play_games(make_lineup, games, seed):
 
     with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
         for i in range(games):
-            game = RecordingEngine(seed=seed + i)
+            game = RecordingEngine(seed=seed)
             lineup = make_lineup(rng)
             actors = []
             for label, factory in lineup:
