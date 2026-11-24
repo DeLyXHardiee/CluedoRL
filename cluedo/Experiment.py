@@ -70,11 +70,15 @@ def run_all_experiments(seed=0, numgames=1000):
     bot_lists = []
     bot_lists.append(bots.BotList(f"all_bots", bots.all_bots()))
     bot_lists.append(bots.BotList(f"test_pool", bots.TEST_POOL))
+    bot_lists.append(bots.BotList(f"falls_for_bluffs", bots.FALLS_FOR_BLUFFS))
+    bot_lists.append(bots.BotList(f"always_first", bots.ALWAYS_FIRST))
+    bot_lists.append(bots.BotList(f"uses_bluffs", bots.USES_BLUFFS))
+    bot_lists.append(bots.BotList(f"good_memory", bots.GOOD_MEMORY))
 
     models = [line for line in (Path(__file__).parent/"models.txt").read_text().splitlines()]
     for i, model in enumerate(models):
-        path = Path(__file__).parent / "checkpoints" / model / "best.pt"
-        analyse_model(path, model, bot_lists, Path(__file__).parent / "analysis" / model, games=numgames, seed=seed+i)
+        path = Path(__file__).parent / "checkpoints" / model / "final.pt"
+        analyse_model(path, model, bot_lists, Path(__file__).parent / "analysis" / model, games=numgames, seed=seed)
 
 if __name__ == "__main__":
     seed = 42

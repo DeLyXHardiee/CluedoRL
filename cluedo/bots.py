@@ -25,7 +25,14 @@ def all_bots():
     return bots_list
 
 def bot(main, after_suggest, knowledge):
-    return lambda: CluedoActor(Strategy(main, after_suggest), knowledge)
+    def make():
+        return CluedoActor(Strategy(main, after_suggest), knowledge)
+
+    main_name = main.__name__.removeprefix("main_")
+    after_name = after_suggest.__name__.removeprefix("after_suggest_")
+    knowledge_name = knowledge.__name__.removesuffix("Knowledge").lower() or "knowledge"
+    make.label = f"{main_name}/{after_name}/{knowledge_name}"
+    return make
 
 first_certain_goodMemory_bot = bot(main_first, after_suggest_certain, GoodMemoryKnowledge)
 first_certain_gullible_bot = bot(main_first, after_suggest_certain, GullibleKnowledge)
@@ -69,4 +76,44 @@ TEST_POOL = [
     random_gamble_goodMemory_bot,
     bluff_gamble_gullible_bot,
     random_certain_knowledge_bot,
+]
+
+FALLS_FOR_BLUFFS = [
+    bluff_certain_gullible_bot,
+    bluff_gamble_gullible_bot,
+    gamble_gamble_gullible_bot,
+    first_gamble_gullible_bot,
+    gamble_certain_gullible_bot,
+    first_certain_gullible_bot,
+    random_certain_gullible_bot,
+    random_gamble_gullible_bot,
+]
+
+ALWAYS_FIRST = [
+    first_certain_goodMemory_bot,
+    first_certain_gullible_bot,
+    first_certain_knowledge_bot,
+    first_gamble_goodMemory_bot,
+    first_gamble_gullible_bot,
+    first_gamble_knowledge_bot,
+]
+
+USES_BLUFFS = [
+    bluff_certain_goodMemory_bot,
+    bluff_certain_gullible_bot,
+    bluff_certain_knowledge_bot,
+    bluff_gamble_goodMemory_bot,
+    bluff_gamble_gullible_bot,
+    bluff_gamble_knowledge_bot,
+]
+
+GOOD_MEMORY = [
+    random_certain_goodMemory_bot,
+    random_gamble_goodMemory_bot,
+    gamble_certain_goodMemory_bot,
+    gamble_gamble_goodMemory_bot,
+    bluff_certain_goodMemory_bot,
+    bluff_gamble_goodMemory_bot,
+    first_certain_goodMemory_bot,
+    first_gamble_goodMemory_bot,
 ]

@@ -50,7 +50,7 @@ def create_lineup(botList, label, policy, n):
         lineup.append(model)
         for i in range(n-1):
             chosen = rng.choice(botList.bots)
-            lineup.append((chosen.__repr__(), chosen))
+            lineup.append((chosen.label, chosen))
         return lineup
     return make
 
@@ -62,7 +62,7 @@ def play_games(make_lineup, games, seed):
 
     with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
         for i in range(games):
-            game = RecordingEngine(seed=seed)
+            game = RecordingEngine(seed=seed + i)
             lineup = make_lineup(rng)
             actors = []
             for label, factory in lineup:
@@ -101,7 +101,7 @@ def analyse_model(path, label, botLists, out_dir, games=2000, seed=1):
     os.makedirs(out_dir, exist_ok=True)
     for n in (3, 4, 5, 6):
         for botList in botLists:
-            action_rows, game_rows = play_games(create_lineup(botList, label, policy, n), games, seed)
+            action_rows, game_rows = play_games(create_lineup(botList, label, policy, n), games, seed=seed)
             actions_path = os.path.join(out_dir, f"test_{n}_{botList.name}_actions.csv")
             game_path = os.path.join(out_dir, f"test_{n}_{botList.name}_game.csv")
             save_rows(action_rows, actions_path)
