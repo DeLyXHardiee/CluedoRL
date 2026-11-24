@@ -2,6 +2,7 @@ import torch
 import csv
 import random
 import os
+import matplotlib.pyplot as plt
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END
 from RL import RLActor, load_actor, bot_factory, TEST_POOL
 from torchrl.envs.utils import set_exploration_type, ExplorationType
@@ -105,3 +106,82 @@ def analyse_model(path, label, botLists, out_dir, games=2000, seed=1):
             game_path = os.path.join(out_dir, f"test_{n}_{botList.name}_game.csv")
             save_rows(action_rows, actions_path)
             save_rows(game_rows, game_path)
+    
+
+def load_log(path):
+    with open(path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return {}
+    return {key: [float(row[key]) for row in rows] for key in rows[0]}
+
+
+def moving_average(values, window):
+    averages = []
+    for i in range(len(values)):
+        recent = values[max(0, i + 1 - window):i + 1]
+        averages.append(sum(recent) / len(recent))
+    return averages
+
+def plot_train_log(run_dir, window=50):
+    log = load_log(os.path.join(run_dir, "train_log.csv"))
+    if not log:
+        print(f"No training data in {run_dir}")
+        return
+
+    titles = {
+        "train_win_rate": "Training win rate",
+        "loss_objective": "Policy loss",
+        "loss_critic": "Critic loss",
+        "loss_entropy": "Entropy loss",
+    }
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7), sharex=True, layout="constrained")
+    for ax, (key, title) in zip(axes.flat, titles.items()):
+        ax.plot(log["frames"], log[key], color="tab:blue", alpha=0.25, linewidth=0.8, label="Per batch")
+        smoothed = moving_average(log[key], window)
+        ax.plot(log["frames"], smoothed, color="tab:blue",
+                label=f"Mean of last {window} batches")
+        ax.set_title(title)
+        ax.grid(alpha=0.3)
+    for ax in axes[1]:
+        ax.set_xlabel("Frames")
+    axes[0, 0].legend()
+
+    fig.savefig(os.path.join(run_dir, "train_plot.png"), dpi=200)
+    plt.close(fig)
+
+def plot_eval_log(run_dir):
+    log = load_log(os.path.join(run_dir, "eval_log.csv"))
+    if not log:
+        print(f"No evaluation data in {run_dir}")
+        return
+
+    fig, (ax_score, ax_wins) = plt.subplots(1, 2, figsize=(12, 4.5), layout="constrained")
+
+    ax_score.plot(log["frames"], log["eval_combined_score"], marker="o", markersize=3, alpha=0.4, label="Combined score")
+    if "eval_smoothed_score" in log:
+        ax_score.plot(log["frames"], log["eval_smoothed_score"], label="Smoothed score")
+    ax_score.axhline(1.0, color="gray", linestyle="--", label="Fair share")
+    ax_score.set_title("Combined evaluation score")
+    ax_score.set_ylabel("Mean of win rate x player count")
+
+    prefix, suffix = "eval_player_count_", "_win_rate"
+    for key in log:
+        if key.startswith(prefix):
+            n = int(key.removeprefix(prefix).removesuffix(suffix))
+            line, = ax_wins.plot(log["frames"], log[key], marker="o", markersize=3, label=f"{n} players")
+            ax_wins.axhline(1 / n, color=line.get_color(), linestyle="--", alpha=0.5)
+    ax_wins.set_title("Win rate by player count (dashed: fair share 1/n)")
+    ax_wins.set_ylabel("Win rate")
+
+    for ax in (ax_score, ax_wins):
+        ax.set_xlabel("Frames")
+        ax.grid(alpha=0.3)
+        ax.legend()
+
+    fig.savefig(os.path.join(run_dir, "eval_plot.png"), dpi=200)
+    plt.close(fig)
+
+def plot_run(run_dir):
+    plot_train_log(run_dir)
+    plot_eval_log(run_dir)

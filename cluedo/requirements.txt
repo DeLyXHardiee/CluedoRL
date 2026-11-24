@@ -1,3 +1,4 @@
 torch
 torchrl
 tensordict
+matplotlib

@@ -338,7 +338,7 @@ def make_critic():
     net = MLP(in_features=OBS_SIZE, out_features=1, num_cells=[256, 256])
     return ValueOperator(net, in_keys=["observation"])
 
-def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size=20, run_name="run", checkpoint_every=100, eval_games=2000, eval_seed=1000, patience=5, min_delta=0.025, player_counts=(3, 4, 5, 6), normalize=True, smooth_window=3):
+def train(max_frames=None, seed=0, self_play=False, snapshot_every=50, pool_size=20, run_name="run", checkpoint_every=100, eval_games=2000, eval_seed=1000, patience=float("inf"), min_delta=0.025, player_counts=(3, 4, 5, 6), normalize=True, smooth_window=3):
     torch.manual_seed(seed)
     timestamp = time.strftime("%Y%m%d-%H%M%S")
     run_name = f"{run_name}_{timestamp}_{seed}"
@@ -505,7 +505,7 @@ def evaluate(actor, opponent_factories, games=2000, seed=1, player_counts=(3, 4,
     win_rates["combined"] = combined_score
     return win_rates
 
-def load_actor(path="checkpoints/self_run_20261117-175453_0/best.pt", normalize=True):
+def load_actor(path="checkpoints/self_run_20261119-110408_0/final.pt", normalize=True):
     actor = make_actor(normalize)
     actor.load_state_dict(torch.load(path))
     return actor
@@ -513,7 +513,7 @@ def load_actor(path="checkpoints/self_run_20261117-175453_0/best.pt", normalize=
 if __name__ == "__main__":
     import sys
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("mode", type=str, help="Mode to run: train or eval", choices=["train", "eval"])
+    argparser.add_argument("mode", type=str, help="Mode to run: train, eval or plots", choices=["train", "eval", "plots"])
     argparser.add_argument("--method", type=str, default="bots", help="Method to run: bots or self play", choices=["bots", "self"])
     argparser.add_argument("--seed", type=int, default=0, help="Random seed for reproducibility")
     argparser.add_argument("--max_frames", type=int, default=None, help="Maximum number of frames to train for")
@@ -523,5 +523,8 @@ if __name__ == "__main__":
         train(max_frames=args.max_frames, run_name=f"{args.method}_run", seed=args.seed, self_play=(args.method == "self"))
     elif args.mode == "eval":
         evaluate(load_actor(), TEST_POOL)
+    elif args.mode == "plots":
+        from Analysis import plot_run
+        plot_run("checkpoints/self_run_20261122-100206_5")
     else:
         argparser.print_help()
