@@ -5,6 +5,15 @@ from Strategies import Strategy, main_first, main_random, main_gamble, main_bluf
 
 # Bots for evaluation
 
+class BotList:
+
+    def __init__(self, name, bots):
+        self.name = name
+        self.bots = bots
+
+    def get_bots(self):
+        return self.bots
+
 main_strategies = [main_first, main_random, main_gamble, main_bluff]
 after_suggest_strategies = [after_suggest_certain, after_suggest_gamble]
 knowledges = [Knowledge, GullibleKnowledge, GoodMemoryKnowledge]
@@ -62,15 +71,32 @@ bluff_gamble_goodMemory_bot = bot(main_bluff, after_suggest_gamble, GoodMemoryKn
 bluff_gamble_gullible_bot = bot(main_bluff, after_suggest_gamble, GullibleKnowledge)
 bluff_gamble_knowledge_bot = bot(main_bluff, after_suggest_gamble, Knowledge)
 
-class BotList:
-
-    def __init__(self, name, bots):
-        self.name = name
-        self.bots = bots
-
-    def get_bots(self):
-        return self.bots
-
+botMap = {
+    "first_certain_goodMemory_bot": first_certain_goodMemory_bot,
+    "first_gamble_goodMemory_bot": first_gamble_goodMemory_bot,
+    "first_gamble_gullible_bot": first_gamble_gullible_bot,
+    "first_gamble_knowledge_bot": first_gamble_knowledge_bot,
+    "first_certain_gullible_bot": first_certain_gullible_bot,
+    "first_certain_knowledge_bot": first_certain_knowledge_bot,
+    "random_certain_goodMemory_bot": random_certain_goodMemory_bot,
+    "random_certain_gullible_bot": random_certain_gullible_bot,
+    "random_certain_knowledge_bot": random_certain_knowledge_bot,
+    "random_gamble_goodMemory_bot": random_gamble_goodMemory_bot,
+    "random_gamble_gullible_bot": random_gamble_gullible_bot,
+    "random_gamble_knowledge_bot": random_gamble_knowledge_bot,
+    "gamble_certain_goodMemory_bot": gamble_certain_goodMemory_bot,
+    "gamble_certain_gullible_bot": gamble_certain_gullible_bot,
+    "gamble_certain_knowledge_bot": gamble_certain_knowledge_bot,
+    "gamble_gamble_goodMemory_bot": gamble_gamble_goodMemory_bot,
+    "gamble_gamble_gullible_bot": gamble_gamble_gullible_bot,
+    "gamble_gamble_knowledge_bot": gamble_gamble_knowledge_bot,
+    "bluff_certain_goodMemory_bot": bluff_certain_goodMemory_bot,
+    "bluff_certain_gullible_bot": bluff_certain_gullible_bot,
+    "bluff_certain_knowledge_bot": bluff_certain_knowledge_bot,
+    "bluff_gamble_goodMemory_bot": bluff_gamble_goodMemory_bot,
+    "bluff_gamble_gullible_bot": bluff_gamble_gullible_bot,
+    "bluff_gamble_knowledge_bot": bluff_gamble_knowledge_bot,
+}
 
 TEST_POOL = [
     random_gamble_goodMemory_bot,
