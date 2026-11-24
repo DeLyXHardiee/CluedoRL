@@ -50,7 +50,16 @@ def create_lineup(botList, label, policy, n):
         lineup.append(model)
         for i in range(n-1):
             chosen = rng.choice(botList.bots)
-            lineup.append((chosen.__repr__(), chosen))
+            lineup.append((None, chosen))
+        return lineup
+    return make
+
+def create_model_lineup(bot, label, policy, n):
+    def make(rng):
+        lineup = []
+        for i in range(n-1):
+            lineup.append((label, lambda: RLActor(policy)))
+        lineup.append((None, bot))
         return lineup
     return make
 
@@ -67,7 +76,7 @@ def play_games(make_lineup, games, seed):
             actors = []
             for label, factory in lineup:
                 actor = factory()
-                actor.label = label
+                actor.label = repr(actor) if label is None else label
                 actors.append(actor)
             game.start(actors)
             game.play()
@@ -106,7 +115,16 @@ def analyse_model(path, label, botLists, out_dir, games=2000, seed=1):
             game_path = os.path.join(out_dir, f"test_{n}_{botList.name}_game.csv")
             save_rows(action_rows, actions_path)
             save_rows(game_rows, game_path)
-    
+
+def analyse_bot(path, label, bot, botname, out_dir, games=2000, seed=1):
+    policy = load_actor(path)
+    os.makedirs(out_dir, exist_ok=True)
+    for n in (3, 4, 5, 6):
+        action_rows, game_rows = play_games(create_model_lineup(bot, label, policy, n), games, seed)
+        actions_path = os.path.join(out_dir, f"test_{n}_{botname}_vs_{label}_actions.csv")
+        game_path = os.path.join(out_dir, f"test_{n}_{botname}_vs_{label}_game.csv")
+        save_rows(action_rows, actions_path)
+        save_rows(game_rows, game_path)
 
 def load_log(path):
     with open(path, newline="") as f:
