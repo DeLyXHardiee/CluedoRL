@@ -327,6 +327,33 @@ def plot_histograms(data, key, xlabel, bins, path):
     fig.savefig(path, dpi=200)
     plt.close(fig)
 
+def plot_head_to_head(root="analysis"):
+    pairs = sorted(m for m in os.listdir(root) if "_vs_" in m)
+
+    def values(method, n):
+        rates = []
+        for pair in pairs:
+            rows = read_rows(root, pair, n, pair, "game")
+            decided = [row for row in rows if row["winner"]]
+            wins = sum(row["winner"].startswith(method) for row in decided)
+            rates.append(wins / len(decided))
+        return rates
+
+    fig, ax = plt.subplots(figsize=(6, 4.5), layout="constrained")
+    grouped_bars(ax, (4, 6), values)
+    ax.axhline(0.5, color="gray", linestyle="--", label="Fair share")
+    ax.set_title("Bot-trained vs self-play, half the seats each")
+    ax.set_xlabel("Players")
+    ax.set_ylabel("Share of decided games won")
+    ax.legend(loc="lower right")
+    fig.savefig(os.path.join(root, "head_to_head.png"), dpi=200)
+    plt.close(fig)
+
 def plot_experiments(root="analysis"):
     plot_win_rates(root)
-    plot_behaviour(root)
+    plot_head_to_head(root)
+    for pool in POOLS:
+        plot_behaviour(root, pool)
+
+if __name__ == "__main__":
+    plot_experiments()

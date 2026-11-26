@@ -84,15 +84,20 @@ def run_all_experiments(seed=0, numgames=1000):
         for botname,bot in list(testBots.items())[:3]:
             analyse_bot(path, model, bot, botname, Path(__file__).parent / "analysis" / model, games=numgames, seed=seed+i+1)
     
-    # Can define specific model here, probably uneccesary to do for all models
-    model1 = models[0] if models else None
-    model2 = models[6] if len(models) > 1 else None
-    if model1 and model2:
-        path1 = Path(__file__).parent / "checkpoints" / model1 / "final.pt"
-        path2 = Path(__file__).parent / "checkpoints" / model2 / "final.pt"
-        analyse_model_vs_model(path1, model1, path2, model2, Path(__file__).parent / "analysis" / f"{model1}_vs_{model2}", games=numgames, seed=seed+len(models))
+    run_head_to_head(models, seed, numgames)
+
+def run_head_to_head(models, seed, numgames):
+    root = Path(__file__).parent
+    half = len(models) // 2
+    for model1, model2 in zip(models[:half], models[half:]):
+        path1 = root / "checkpoints" / model1 / "final.pt"
+        path2 = root / "checkpoints" / model2 / "final.pt"
+        out_dir = root / "analysis" / f"{model1}_vs_{model2}"
+        analyse_model_vs_model(path1, model1, path2, model2, out_dir, games=numgames, seed=seed)
 
 if __name__ == "__main__":
     seed = 42
     numgames = 1000
-    run_all_experiments(seed=seed, numgames=numgames)
+    #run_all_experiments(seed=seed, numgames=numgames)
+    models = (Path(__file__).parent / "models.txt").read_text().splitlines()
+    run_head_to_head(models, seed, numgames)
