@@ -2,7 +2,7 @@ from pathlib import Path
 import math
 import random
 
-from Actor import CluedoActor, Knowledge, GullibleKnowledge, GoodMemoryKnowledge
+from Actor import CluedoActor, Knowledge, GullibleKnowledge, NoInferenceKnowledge
 from Strategies import Strategy, main_first, main_random, main_gamble, main_bluff, after_suggest_certain, after_suggest_gamble
 from GameEngine import CluedoGameEngine
 from RL import RLActor, load_actor
@@ -12,7 +12,7 @@ from Analysis import analyse_bot, analyse_model, analyse_model_vs_model
     
 main_strategies = [main_first, main_random, main_gamble, main_bluff]
 after_suggest_strategies = [after_suggest_certain, after_suggest_gamble]
-knowledges = [Knowledge, GullibleKnowledge, GoodMemoryKnowledge]
+knowledges = [Knowledge, GullibleKnowledge, NoInferenceKnowledge]
 
 class Experiment:
     def __init__(self, name="", players=None, seed=0, num_games=1):
@@ -73,8 +73,8 @@ def run_all_experiments(seed=0, numgames=1000):
     bot_lists.append(bots.BotList(f"falls_for_bluffs", bots.FALLS_FOR_BLUFFS))
     bot_lists.append(bots.BotList(f"always_first", bots.ALWAYS_FIRST))
     bot_lists.append(bots.BotList(f"uses_bluffs", bots.USES_BLUFFS))
-    bot_lists.append(bots.BotList(f"good_memory", bots.GOOD_MEMORY))
-
+    bot_lists.append(bots.BotList(f"no_inference", bots.NO_INFERENCE))
+    bot_lists.append(bots.BotList(f"normal_knowledge", bots.NORMAL_KNOWLEDGE))
     # Should probably handpick bots from botMap but currently just take 3
     testBots = bots.botMap
     models = [line for line in (Path(__file__).parent/"models.txt").read_text().splitlines()]
@@ -98,6 +98,4 @@ def run_head_to_head(models, seed, numgames):
 if __name__ == "__main__":
     seed = 42
     numgames = 1000
-    #run_all_experiments(seed=seed, numgames=numgames)
-    models = (Path(__file__).parent / "models.txt").read_text().splitlines()
-    run_head_to_head(models, seed, numgames)
+    run_all_experiments(seed=seed, numgames=numgames)

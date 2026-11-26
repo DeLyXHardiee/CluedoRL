@@ -223,8 +223,8 @@ def plot_run(run_dir):
 
 METHODS = {"bots_run": "Bot-trained", "self_run": "Self-play"}
 COLORS = {"bots_run": "#1f77b4", "self_run": "#e8702a"}
-POOLS = ["all_bots", "test_pool", "falls_for_bluffs",
-         "always_first", "uses_bluffs", "good_memory"]
+POOLS = ["normal_knowledge", "all_bots", "test_pool", "falls_for_bluffs",
+        "always_first", "uses_bluffs", "good_memory"]
 T95 = {2: 12.71, 3: 4.30, 4: 3.18, 5: 2.78, 6: 2.57}
 
 def models_of(method, root):

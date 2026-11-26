@@ -171,63 +171,8 @@ class GullibleKnowledge(Knowledge):
                 result += [c for c in range(lo, hi) if c not in self.face_up and c not in self.hand]
         return result
 
-class GoodMemoryKnowledge(Knowledge):
-    # remember all turns that have been played to improve deduction
-    def __init__(self, *args, **kwargs):
-        self.history = []
-        super().__init__(*args, **kwargs)
-
-    def observe(self, event):
-        self.history.append(event)
-        super().observe(event)
-
+class NoInferenceKnowledge(Knowledge):
+    # This class does not perform any inference beyond direct observations.
     def propagate(self):
-        while self.deduce_from_history() or self.apply_one_of() or self.apply_owner_and_full_hands(): 
+        while self.apply_owner_and_full_hands():
             pass
-
-    def deduce_from_history(self):
-        changed = False
-        for event in self.history:
-            if event["kind"] != ActionTypes.SUGGEST:
-                continue
-            answerer = event["answerer"]
-            if answerer is None or event["shown"] is not None:
-                continue
-            cards = event["cards"]
-            if any(self.table[answerer][card] == YES for card in cards):
-                continue
-            possible_cards = [
-                card for card in cards
-                if self.table[answerer][card] != NO
-                and not any(
-                    self.table[seat][card] == YES
-                    for seat in range(self.n)
-                    if seat != answerer
-                )
-            ]
-            if len(possible_cards) == 1:
-                #print(f"Deduced card {possible_cards[0]} for player {answerer} from history event {event} at turn {len(self.history)}")
-                #self.printTable()
-                self.table[answerer][possible_cards[0]] = YES
-                changed = True
-        return changed
-
-    # print a pretty representation of the knowledge table
-    def printTable(self):
-        for seat in range(self.n):
-            if seat == 0:
-                print("          ", end="")
-                for card in range(len(self.table[seat])):
-                    print(f"{card:2}  ", end=" ")
-                print()
-            for card in range(len(self.table[seat])):
-                val = self.table[seat][card]
-                if card == 0:
-                    print(f"Player {seat}: ", end="")
-                if val == YES:
-                    print("Y   ", end=" ")
-                elif val == NO:
-                    print("N   ", end=" ")
-                else:
-                    print("-   ", end=" ")
-            print()

@@ -18,49 +18,34 @@ from tensordict import TensorDict
 from tensordict.nn import TensorDictModule
 from torchrl.modules import MLP, ProbabilisticActor, ValueOperator, MaskedCategorical
 from GameEngine import CluedoGameEngine, SUGGEST, ACCUSE, END, AFTER_SUGGEST, MAIN
-from Actor import CluedoActor, Knowledge, GullibleKnowledge, GoodMemoryKnowledge
+from Actor import CluedoActor, Knowledge, GullibleKnowledge, NoInferenceKnowledge
 from functools import partial
 from Strategies import Strategy, main_first, after_suggest_certain, main_random, main_gamble, main_bluff, after_suggest_gamble
+import bots as bots
 
 MAX_PLAYERS = 6
 OBS_SIZE = MAX_PLAYERS * 21 * 3 + 21 + 4 + MAX_PLAYERS + MAX_PLAYERS + 2 + MAX_PLAYERS * 21 # 543
 
-
-def bot(main=main_first, after_suggest=after_suggest_certain, knowledge=Knowledge):
-      return lambda: CluedoActor(Strategy(main, after_suggest), knowledge)
-
-bot_factory = {
-    "first/certain/knowledge": bot(main_first, after_suggest_certain, Knowledge),
-    "random/certain/gullible": bot(main_random, after_suggest_certain, GullibleKnowledge),
-    "gamble/gamble/knowledge": bot(main_gamble, after_suggest_gamble, Knowledge),
-    "bluff/certain/goodmemory": bot(main_bluff, after_suggest_certain, GoodMemoryKnowledge),
-    "first/gamble/goodmemory": bot(main_first, after_suggest_gamble, GoodMemoryKnowledge),
-    "gamble/gamble/goodmemory": bot(main_gamble, after_suggest_gamble, GoodMemoryKnowledge),
-    "bluff/certain/knowledge": bot(main_bluff, after_suggest_certain, Knowledge),
-    "first/certain/gullible": bot(main_first, after_suggest_certain, GullibleKnowledge),
-    "random/gamble/goodmemory": bot(main_random, after_suggest_gamble, GoodMemoryKnowledge),
-    "bluff/gamble/gullible": bot(main_bluff, after_suggest_gamble, GullibleKnowledge),
-    "random/certain/knowledge": bot(main_random, after_suggest_certain, Knowledge),
-}
+bot_factory = bots.botMap
 
 TRAIN_POOL = [
-    "first/certain/knowledge",
-    "random/certain/gullible",
-    "gamble/gamble/knowledge",
-    "bluff/certain/goodmemory",
-    "first/gamble/goodmemory",
+    "first_certain_knowledge_bot",
+    "random_certain_gullible_bot",
+    "gamble_gamble_knowledge_bot",
+    "bluff_certain_no_inference_bot",
+    "first_gamble_no_inference_bot",
 ]
 
 VAL_POOL = [
-    "gamble/gamble/goodmemory",
-    "bluff/certain/knowledge",
-    "first/certain/gullible",
+    "gamble_gamble_no_inference_bot",
+    "bluff_certain_knowledge_bot",
+    "first_certain_gullible_bot",
 ]
 
 TEST_POOL = [
-    "random/gamble/goodmemory",
-    "bluff/gamble/gullible",
-    "random/certain/knowledge",
+    "random_gamble_no_inference_bot",
+    "bluff_gamble_gullible_bot",
+    "random_gamble_knowledge_bot",
 ]
 
 assert not any(bot in VAL_POOL for bot in TRAIN_POOL), "Validation pool overlaps with training pool"
