@@ -1,13 +1,13 @@
 ### What's missing
 [x] Torch needs to be seeded just like the env
 [x] Code to stop training when converged (define convergence) (we should use a different eval seed for the stopping check than for the final results)
-[ ] Code to plot training and other interesting data
+[x] Code to plot training and other interesting data
 [x] Build a strategy that might fall for bluffing
 [x] Build a baseline "smart" strategy and maybe use this as a held-out opponent (only played against in evaluation)
-[ ] Decide on and implement suggestion history in the observation (bluffing question)
-[ ] Decide on the train, validation and test sets of combinations of bot components
+[x] Decide on and implement suggestion history in the observation (bluffing question)
+[x] Decide on the train, validation and test sets of combinations of bot components
 [x] Decide on an experiment list (bots only, self play, mixed pool?), how many seeds each and max frame budget vs convergence, and cross-play evaluation (all final models against each other)
-[ ] Decide on card reveal limitation: choose_reveal always shows the first matching card. We should either accept that and mention it in the report, or add it to the RL actions.
+[x] Decide on card reveal limitation: choose_reveal always shows the first matching card. We should either accept that and mention it in the report, or add it to the RL actions.
 
 
 ### To improve training we tried
@@ -41,3 +41,20 @@ Secondary results include
 - The equal-batch comparison.
 - The behaviour metrics: bluff rate, information leaked, and confidence at accusation time.
 
+
+
+
+
+Meeting Notes:
+include in the RQ that we use domain knowledge?
+include both before and after masking
+include compute limitations
+HPC?
+
+alternative: higher learning rate at the beginning to explore more?
+
+report:
+in background, what have been other approaches of hidden information
+explain PPO and self play
+limitations - domain knowledge used, maybe how we'd use less?
+graphical abstract
