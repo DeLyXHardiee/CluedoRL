@@ -40,5 +40,8 @@ rl-reason-game/wandb/
 __pycache__/
 .pytest_cache/
 
-# Models
+# Models & Data
 *.pt
+analysis/
+checkpoints/
+old_checkpoints/
